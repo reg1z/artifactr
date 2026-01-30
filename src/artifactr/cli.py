@@ -9,7 +9,15 @@ import sys
 from typing import Any
 
 from . import __version__
-from .catalog import add_vaults, list_vaults, remove_vaults, select_default
+from .catalog import (
+    add_vaults,
+    get_default_tool,
+    list_tools_info,
+    list_vaults,
+    remove_vaults,
+    select_default,
+    select_default_tool,
+)
 from .importer import import_artifacts
 from .tools import get_supported_tools
 
@@ -38,6 +46,12 @@ def create_parser() -> argparse.ArgumentParser:
         "--tools",
         help=f"Comma-separated list of tools to import ({', '.join(get_supported_tools())})",
     )
+    import_parser.add_argument(
+        "--link",
+        "-l",
+        action="store_true",
+        help="Symlink vault contents instead of copying",
+    )
 
     # vault command with subcommands
     vault_parser = subparsers.add_parser("vault", help="Manage vaults")
@@ -58,6 +72,19 @@ def create_parser() -> argparse.ArgumentParser:
     # vault list
     vault_subparsers.add_parser("list", help="List all vaults")
 
+    # tool command with subcommands
+    tool_parser = subparsers.add_parser("tool", help="Manage tool selection")
+    tool_subparsers = tool_parser.add_subparsers(dest="tool_command")
+
+    # tool select
+    tool_select = tool_subparsers.add_parser("select", help="Set default tool")
+    tool_select.add_argument(
+        "name", help=f"Tool name ({', '.join(get_supported_tools())})"
+    )
+
+    # tool list
+    tool_subparsers.add_parser("list", help="List supported tools")
+
     return parser
 
 
@@ -70,13 +97,20 @@ def handle_import(args: argparse.Namespace) -> int:
     Returns:
         Exit code (0 for success, 1 for error).
     """
-    # Parse tools if provided
-    tools_list: list[str] | None = None
+    # Parse tools if provided, otherwise use default tool
+    tools_list: list[str]
     if args.tools:
         tools_list = [t.strip() for t in args.tools.split(",")]
+    else:
+        tools_list = [get_default_tool()]
 
     # Perform import
-    result = import_artifacts(target=args.target, vault=args.vault, tools=tools_list)
+    result = import_artifacts(
+        target=args.target,
+        vault=args.vault,
+        tools=tools_list,
+        link=args.link,
+    )
 
     if not result["success"]:
         for error in result["errors"]:
@@ -205,6 +239,51 @@ def handle_vault_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def handle_tool_select(args: argparse.Namespace) -> int:
+    """Handle the tool select command.
+
+    Args:
+        args: Parsed command-line arguments.
+
+    Returns:
+        Exit code (0 for success, 1 for error).
+    """
+    supported_tools = get_supported_tools()
+    if select_default_tool(args.name, supported_tools):
+        print(f"Default tool set to: {args.name}")
+        return 0
+    else:
+        print(
+            f"Error: Unsupported tool: {args.name}. "
+            f"Supported tools: {', '.join(supported_tools)}",
+            file=sys.stderr,
+        )
+        return 1
+
+
+def handle_tool_list(args: argparse.Namespace) -> int:
+    """Handle the tool list command.
+
+    Args:
+        args: Parsed command-line arguments (unused).
+
+    Returns:
+        Exit code (0 for success).
+    """
+    _ = args  # unused
+    supported_tools = get_supported_tools()
+    info = list_tools_info(supported_tools)
+
+    print("Supported tools:")
+    for tool_name in info["tools"]:
+        if tool_name == info["default"]:
+            print(f"  * {tool_name} (default)")
+        else:
+            print(f"    {tool_name}")
+
+    return 0
+
+
 def main() -> int:
     """Main entry point for the CLI.
 
@@ -235,6 +314,17 @@ def main() -> int:
             return handle_vault_select(args)
         if args.vault_command == "list":
             return handle_vault_list(args)
+
+    if args.command == "tool":
+        if args.tool_command is None:
+            # Print tool subcommand help
+            parser.parse_args(["tool", "--help"])
+            return 0
+
+        if args.tool_command == "select":
+            return handle_tool_select(args)
+        if args.tool_command == "list":
+            return handle_tool_list(args)
 
     return 0
 

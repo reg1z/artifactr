@@ -159,3 +159,47 @@ def get_vault_by_name_or_path(identifier: str) -> str | None:
             return vault_path
 
     return None
+
+
+def select_default_tool(tool_name: str, supported_tools: list[str]) -> bool:
+    """Set a tool as the default.
+
+    Args:
+        tool_name: Name of the tool to set as default.
+        supported_tools: List of supported tool names for validation.
+
+    Returns:
+        True if successful, False if the tool is not supported.
+    """
+    if tool_name not in supported_tools:
+        return False
+
+    config = load_config()
+    config["default_tool"] = tool_name
+    save_config(config)
+    return True
+
+
+def get_default_tool() -> str:
+    """Get the default tool name.
+
+    Returns:
+        The default tool name.
+    """
+    config = load_config()
+    return config["default_tool"]
+
+
+def list_tools_info(supported_tools: list[str]) -> dict[str, Any]:
+    """Get information about tools and current default.
+
+    Args:
+        supported_tools: List of supported tool names.
+
+    Returns:
+        Dict with keys:
+            - tools: List of all supported tool names
+            - default: Name of the default tool
+    """
+    config = load_config()
+    return {"tools": supported_tools, "default": config["default_tool"]}

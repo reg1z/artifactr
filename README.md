@@ -35,17 +35,30 @@ art vault select ~/my-vault
 art vault rm ~/my-vault
 ```
 
+### Managing Tools
+
+```sh
+# List supported tools and see current default
+art tool list
+
+# Set default tool (defaults to opencode)
+art tool select claude-code
+```
+
 ### Importing Artifacts
 
 ```sh
-# Import all artifacts from default vault
+# Import artifacts from default vault to default tool
 art import ~/repos/my-project
 
 # Import from a specific vault
 art import ~/repos/my-project --vault=~/my-vault
 
-# Import for specific tools only
+# Import for specific tools (overrides default)
 art import ~/repos/my-project --tools=claude-code,opencode
+
+# Symlink artifacts instead of copying
+art import ~/repos/my-project --link
 ```
 
 ## Vault Structure
@@ -62,4 +75,4 @@ vault/
     └── command-name.md
 ```
 
-Artifacts are copied to tool-specific directories in the target repo (e.g., `.claude/skills/`, `.opencode/agents/`) and automatically excluded from git tracking.
+Artifacts are copied (or symlinked with `--link`) to tool-specific directories in the target repo (e.g., `.claude/skills/`, `.opencode/agents/`) and automatically excluded from git tracking.

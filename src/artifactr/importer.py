@@ -69,12 +69,13 @@ def prompt_overwrite(path: Path) -> bool:
         return False
 
 
-def copy_with_prompt(src: Path, dst: Path) -> dict[str, int]:
-    """Copy files/directories with user confirmation for overwrites.
+def copy_with_prompt(src: Path, dst: Path, link: bool = False) -> dict[str, int]:
+    """Copy or symlink files/directories with user confirmation for overwrites.
 
     Args:
         src: Source path (file or directory).
         dst: Destination path.
+        link: If True, create symlinks instead of copying.
 
     Returns:
         Dict with counts: {"copied": n, "skipped": n}
@@ -86,14 +87,21 @@ def copy_with_prompt(src: Path, dst: Path) -> dict[str, int]:
         # Ensure parent directory exists
         dst.parent.mkdir(parents=True, exist_ok=True)
 
-        if dst.exists():
+        if dst.exists() or dst.is_symlink():
             if prompt_overwrite(dst):
-                shutil.copy2(src, dst)
+                dst.unlink()
+                if link:
+                    dst.symlink_to(src.resolve())
+                else:
+                    shutil.copy2(src, dst)
                 copied += 1
             else:
                 skipped += 1
         else:
-            shutil.copy2(src, dst)
+            if link:
+                dst.symlink_to(src.resolve())
+            else:
+                shutil.copy2(src, dst)
             copied += 1
 
     elif src.is_dir():
@@ -104,7 +112,7 @@ def copy_with_prompt(src: Path, dst: Path) -> dict[str, int]:
                 rel_path = src_file.relative_to(src)
                 dst_file = dst / rel_path
 
-                result = copy_with_prompt(src_file, dst_file)
+                result = copy_with_prompt(src_file, dst_file, link=link)
                 copied += result["copied"]
                 skipped += result["skipped"]
 
@@ -112,7 +120,10 @@ def copy_with_prompt(src: Path, dst: Path) -> dict[str, int]:
 
 
 def import_artifacts(
-    target: str, vault: str | None = None, tools: list[str] | None = None
+    target: str,
+    vault: str | None = None,
+    tools: list[str] | None = None,
+    link: bool = False,
 ) -> dict[str, Any]:
     """Import artifacts from a vault into a target git repository.
 
@@ -120,6 +131,7 @@ def import_artifacts(
         target: Path to the target git repository.
         vault: Vault name or path to import from. Uses default vault if None.
         tools: List of tool names to import for. Imports for all tools if None.
+        link: If True, create symlinks instead of copying files.
 
     Returns:
         Result dict with keys:
@@ -197,11 +209,11 @@ def import_artifacts(
 
             dest_path = tool_adapter.get_destination(artifact_type, target_path)
 
-            # Copy each artifact in the source directory
+            # Copy or symlink each artifact in the source directory
             artifact_count = 0
             for item in source_path.iterdir():
                 item_dest = dest_path / item.name
-                result = copy_with_prompt(item, item_dest)
+                result = copy_with_prompt(item, item_dest, link=link)
                 artifact_count += result["copied"]
                 total_skipped += result["skipped"]
 
