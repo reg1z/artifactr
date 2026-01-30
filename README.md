@@ -14,7 +14,9 @@ A cross-platform CLI tool for managing AI project artifacts. Maintain a personal
 Requires Python 3.
 
 ```sh
-pip install artifactr
+git clone https://github.com/reg1z/artifactr
+cd artifactr
+pip install .
 ```
 
 ## Usage
