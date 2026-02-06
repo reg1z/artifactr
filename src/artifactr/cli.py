@@ -14,6 +14,7 @@ from .catalog import (
     get_default_tool,
     list_tools_info,
     list_vaults,
+    name_vault,
     remove_vaults,
     select_default,
     select_default_tool,
@@ -60,14 +61,22 @@ def create_parser() -> argparse.ArgumentParser:
     # vault add
     vault_add = vault_subparsers.add_parser("add", help="Add vaults to catalog")
     vault_add.add_argument("paths", nargs="+", help="Vault paths to add")
+    vault_add.add_argument(
+        "--name", help="Name for the vault (only when adding a single vault)"
+    )
 
     # vault rm
     vault_rm = vault_subparsers.add_parser("rm", help="Remove vaults from catalog")
     vault_rm.add_argument("paths", nargs="+", help="Vault paths to remove")
 
+    # vault name
+    vault_name = vault_subparsers.add_parser("name", help="Set or change a vault's name")
+    vault_name.add_argument("vault", help="Vault name or path to rename")
+    vault_name.add_argument("name", help="New name for the vault")
+
     # vault select
     vault_select = vault_subparsers.add_parser("select", help="Set default vault")
-    vault_select.add_argument("path", help="Vault path to set as default")
+    vault_select.add_argument("path", help="Vault name or path to set as default")
 
     # vault list
     vault_subparsers.add_parser("list", help="List all vaults")
@@ -155,11 +164,17 @@ def handle_vault_add(args: argparse.Namespace) -> int:
     Returns:
         Exit code (0 for success, 1 for error).
     """
-    result = add_vaults(args.paths)
+    name = getattr(args, "name", None)
+    if name and len(args.paths) > 1:
+        print("Error: --name can only be used when adding a single vault.", file=sys.stderr)
+        return 1
+
+    result = add_vaults(args.paths, name=name)
 
     # Print results
     for path in result["added"]:
-        print(f"Added vault: {path}")
+        vault_label = f"{name} ({path})" if name and path == result["added"][0] else path
+        print(f"Added vault: {vault_label}")
 
     for path in result["skipped"]:
         print(f"Vault already registered: {path}")
@@ -229,14 +244,38 @@ def handle_vault_list(args: argparse.Namespace) -> int:
         print("No vaults registered. Use 'art vault add <path>' to add a vault.")
         return 0
 
+    vault_names = info["vault_names"]
     print("Registered vaults:")
     for vault_path in info["vaults"]:
-        if vault_path == info["default"]:
-            print(f"  * {vault_path} (default)")
+        name = vault_names.get(vault_path)
+        default_marker = " (default)" if vault_path == info["default"] else ""
+        prefix = "  * " if vault_path == info["default"] else "    "
+
+        if name:
+            print(f"{prefix}{name} ({vault_path}){default_marker}")
         else:
-            print(f"    {vault_path}")
+            print(f"{prefix}{vault_path}{default_marker}")
 
     return 0
+
+
+def handle_vault_name(args: argparse.Namespace) -> int:
+    """Handle the vault name command.
+
+    Args:
+        args: Parsed command-line arguments.
+
+    Returns:
+        Exit code (0 for success, 1 for error).
+    """
+    result = name_vault(args.vault, args.name)
+
+    if result["success"]:
+        print(f"Vault '{result['vault_path']}' named: {args.name}")
+        return 0
+    else:
+        print(f"Error: {result['error']}", file=sys.stderr)
+        return 1
 
 
 def handle_tool_select(args: argparse.Namespace) -> int:
@@ -310,6 +349,8 @@ def main() -> int:
             return handle_vault_add(args)
         if args.vault_command == "rm":
             return handle_vault_rm(args)
+        if args.vault_command == "name":
+            return handle_vault_name(args)
         if args.vault_command == "select":
             return handle_vault_select(args)
         if args.vault_command == "list":

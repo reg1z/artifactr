@@ -13,8 +13,9 @@ Artifactr is a cross-platform Python CLI tool for managing AI project artifacts.
 | Term | Definition |
 |------|------------|
 | **Artifact** | An individual skill, agent, command, or other configuration file stored in a vault |
-| **Vault** | A user-specified directory containing artifacts in a tool-agnostic format |
+| **Vault** | A user-specified directory containing artifacts in a tool-agnostic format, optionally identified by a name |
 | **Catalog** | The collection of all registered vaults |
+| **Vault Name** | An optional user-assigned alias for a vault, usable in place of its full directory path |
 | **Tool** | An AI coding assistant (e.g., claude-code, opencode) that artifacts can be imported into |
 
 ## Requirements
@@ -37,6 +38,7 @@ Artifactr is a cross-platform Python CLI tool for managing AI project artifacts.
 2.2. The configuration file MUST contain:
 - `vaults`: A list of registered vault paths
 - `default_vault`: Path to the current default vault (or `null` if none set)
+- `vault_names`: A mapping of vault paths to their user-assigned names (may be empty)
 
 ### 3. Vault Structure
 
@@ -118,6 +120,13 @@ vault/skills/my-skill/  ──┬──>  repo/.claude/skills/my-skill/   (claud
 
 6.4. When no vault is explicitly specified, commands MUST use the default vault.
 
+6.5. Any command that accepts a vault identifier MUST resolve it in the following order:
+1. Exact resolved filesystem path
+2. Vault name (from `vault_names`)
+3. Directory basename match
+
+6.6. Vault names MUST be unique across the catalog. Attempting to assign a name already in use by another vault MUST produce an error.
+
 ### 7. Commands
 
 #### 7.1. `art import <target> [options]`
@@ -170,12 +179,15 @@ art import ~/repos/project --tools=claude-code
 art import ~/repos/project --vault=favorites --tools=claude-code,opencode
 ```
 
-#### 7.2. `art vault add <path> [path...]`
+#### 7.2. `art vault add <path> [path...] [--name=<name>]`
 
 Adds one or more directories to the vault catalog.
 
 **Arguments:**
 - `path` (required, multiple): One or more directory paths to add as vaults
+
+**Options:**
+- `--name=<name>`: Assign a name to the vault (only valid when adding a single vault)
 
 **Behavior:**
 
@@ -187,21 +199,28 @@ Adds one or more directories to the vault catalog.
 
 7.2.4. MUST display confirmation for each vault added.
 
+7.2.5. If `--name` is provided with multiple paths, MUST display an error.
+
+7.2.6. If `--name` is provided and the name is already in use, MUST display an error.
+
 **Examples:**
 ```sh
 # Add single vault
 art vault add ~/Documents/my-vault
 
+# Add a vault with a name
+art vault add ~/Documents/my-vault --name=favorites
+
 # Add multiple vaults
 art vault add ~/Documents/favorites ~/Documents/work
 ```
 
-#### 7.3. `art vault rm <path> [path...]`
+#### 7.3. `art vault rm <identifier> [identifier...]`
 
-Removes one or more directories from the vault catalog.
+Removes one or more vaults from the catalog.
 
 **Arguments:**
-- `path` (required, multiple): One or more vault paths to remove
+- `identifier` (required, multiple): One or more vault names or paths to remove
 
 **Behavior:**
 
@@ -209,25 +228,31 @@ Removes one or more directories from the vault catalog.
 
 7.3.2. If a removed vault was the default, MUST set `default_vault` to `null`.
 
-7.3.3. MUST display confirmation for each vault removed.
+7.3.3. MUST remove the vault's name from `vault_names` if one was assigned.
 
-7.3.4. MUST display a warning if a specified vault is not in the catalog.
+7.3.4. MUST display confirmation for each vault removed.
+
+7.3.5. MUST display a warning if a specified vault is not in the catalog.
 
 **Examples:**
 ```sh
+# Remove by path
 art vault rm ~/Documents/old-vault
+
+# Remove by name
+art vault rm favorites
 ```
 
-#### 7.4. `art vault select <path>`
+#### 7.4. `art vault select <identifier>`
 
 Sets a vault as the default.
 
 **Arguments:**
-- `path` (required): Path to the vault to set as default
+- `identifier` (required): Name or path of the vault to set as default
 
 **Behavior:**
 
-7.4.1. MUST validate that the vault exists in the catalog.
+7.4.1. MUST validate that the vault exists in the catalog (resolved per §6.5).
 
 7.4.2. MUST update `default_vault` in the configuration.
 
@@ -235,7 +260,11 @@ Sets a vault as the default.
 
 **Examples:**
 ```sh
+# Select by path
 art vault select ~/Documents/favorites
+
+# Select by name
+art vault select favorites
 ```
 
 #### 7.5. `art vault list`
@@ -252,11 +281,42 @@ Lists all vaults in the catalog.
 
 7.5.3. If no vaults are registered, MUST display a helpful message.
 
+7.5.4. Named vaults MUST display their name first, followed by the directory path in parentheses.
+
+7.5.5. Unnamed vaults MUST display only their directory path.
+
 **Example Output:**
 ```
 Registered vaults:
-  * /home/user/Documents/my-vault (default)
+  * favorites (/home/user/Documents/my-vault) (default)
     /home/user/Documents/work-vault
+```
+
+#### 7.6. `art vault name <identifier> <name>`
+
+Sets or changes the name of a vault.
+
+**Arguments:**
+- `identifier` (required): Name or path of the vault to name
+- `name` (required): The new name to assign
+
+**Behavior:**
+
+7.6.1. MUST validate that the vault exists in the catalog (resolved per §6.5).
+
+7.6.2. MUST validate that the name is not already in use by another vault. Re-assigning the same name to the same vault is allowed (idempotent).
+
+7.6.3. MUST update `vault_names` in the configuration.
+
+7.6.4. MUST display confirmation of the assigned name.
+
+**Examples:**
+```sh
+# Name a vault by its path
+art vault name ~/Documents/my-vault favorites
+
+# Rename a vault by its current name
+art vault name favorites work
 ```
 
 ### 8. Error Handling

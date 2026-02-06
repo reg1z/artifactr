@@ -30,14 +30,14 @@ def load_config() -> dict[str, Any]:
     config_path = get_config_path()
 
     if not config_path.exists():
-        return {"vaults": [], "default_vault": None, "default_tool": DEFAULT_TOOL}
+        return {"vaults": [], "default_vault": None, "default_tool": DEFAULT_TOOL, "vault_names": {}}
 
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
     # Handle empty file or invalid YAML
     if config is None:
-        return {"vaults": [], "default_vault": None, "default_tool": DEFAULT_TOOL}
+        return {"vaults": [], "default_vault": None, "default_tool": DEFAULT_TOOL, "vault_names": {}}
 
     # Ensure required keys exist with proper defaults
     if "vaults" not in config:
@@ -46,6 +46,8 @@ def load_config() -> dict[str, Any]:
         config["default_vault"] = None
     if "default_tool" not in config:
         config["default_tool"] = DEFAULT_TOOL
+    if "vault_names" not in config:
+        config["vault_names"] = {}
 
     return config
 

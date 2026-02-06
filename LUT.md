@@ -10,5 +10,6 @@
 | specs/artifactr_spec.md §5.3 | src/artifactr/tools/opencode.py | OpenCode import destinations (.opencode/) |
 | specs/artifactr_spec.md §6 | src/artifactr/cli.py | CLI interface using argparse |
 | specs/artifactr_spec.md §7.1 | src/artifactr/importer.py | `art import` command logic |
-| specs/artifactr_spec.md §7.2-7.5 | src/artifactr/catalog.py | Vault management (add/rm/select/list) |
+| specs/artifactr_spec.md §6.5-6.6 | src/artifactr/catalog.py:181-208 | Vault identifier resolution (path/name/basename) |
+| specs/artifactr_spec.md §7.2-7.6 | src/artifactr/catalog.py | Vault management (add/rm/select/list/name) |
 | specs/artifactr_spec.md §7.1.8 | src/artifactr/importer.py:18-52 | Git exclude file management |
