@@ -18,3 +18,6 @@ class ClaudeCodeAdapter(ToolAdapter):
 
     def get_destination(self, artifact_type: str, target_repo: Path) -> Path:
         return target_repo / ".claude" / artifact_type
+
+    def get_global_destination(self, artifact_type: str) -> Path:
+        return Path.home() / ".claude" / artifact_type

@@ -22,7 +22,7 @@ from .catalog import (
     select_default,
     select_default_tool,
 )
-from .importer import copy_with_prompt, import_artifacts
+from .importer import copy_with_prompt, import_artifacts, import_artifacts_global
 from .scanner import discover_artifacts, extract_description, load_import_cache
 from .tools import get_supported_tools
 
@@ -43,7 +43,9 @@ def create_parser() -> argparse.ArgumentParser:
     import_parser = subparsers.add_parser(
         "import", help="Import artifacts into a git repo"
     )
-    import_parser.add_argument("target", help="Path to target git repository")
+    import_parser.add_argument(
+        "target", nargs="?", default=None, help="Path to target git repository"
+    )
     import_parser.add_argument(
         "--vault", help="Vault to import from (default: default vault)"
     )
@@ -60,6 +62,19 @@ def create_parser() -> argparse.ArgumentParser:
     import_parser.add_argument(
         "--artifacts",
         help="Comma-separated list of artifact names to import",
+    )
+    import_parser.add_argument(
+        "--global",
+        "-g",
+        action="store_true",
+        dest="global_import",
+        help="Import into global config directories instead of a local repo",
+    )
+    import_parser.add_argument(
+        "--force",
+        "-f",
+        action="store_true",
+        help="Overwrite existing files without prompting",
     )
 
     # vault command with subcommands
@@ -133,6 +148,18 @@ def handle_import(args: argparse.Namespace) -> int:
     Returns:
         Exit code (0 for success, 1 for error).
     """
+    global_import = getattr(args, "global_import", False)
+    force = getattr(args, "force", False)
+
+    # Validate: need either --global or a target
+    if not global_import and args.target is None:
+        print(
+            "Error: A target repository is required unless --global is used.\n"
+            "Usage: art import <target> or art import --global",
+            file=sys.stderr,
+        )
+        return 1
+
     # Parse tools if provided, otherwise use default tool
     tools_list: list[str]
     if args.tools:
@@ -145,14 +172,23 @@ def handle_import(args: argparse.Namespace) -> int:
     if getattr(args, "artifacts", None):
         artifacts_list = [a.strip() for a in args.artifacts.split(",")]
 
-    # Perform import
-    result = import_artifacts(
-        target=args.target,
-        vault=args.vault,
-        tools=tools_list,
-        link=args.link,
-        artifacts=artifacts_list,
-    )
+    if global_import:
+        result = import_artifacts_global(
+            vault=args.vault,
+            tools=tools_list,
+            link=args.link,
+            artifacts=artifacts_list,
+            force=force,
+        )
+    else:
+        result = import_artifacts(
+            target=args.target,
+            vault=args.vault,
+            tools=tools_list,
+            link=args.link,
+            artifacts=artifacts_list,
+            force=force,
+        )
 
     if not result["success"]:
         for error in result["errors"]:

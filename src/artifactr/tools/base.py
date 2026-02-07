@@ -39,3 +39,8 @@ class ToolAdapter(ABC):
     def get_destination(self, artifact_type: str, target_repo: Path) -> Path:
         """Return the destination path for an artifact type in the target repo."""
         pass
+
+    @abstractmethod
+    def get_global_destination(self, artifact_type: str) -> Path:
+        """Return the global config path for an artifact type."""
+        pass

@@ -18,3 +18,6 @@ class OpenCodeAdapter(ToolAdapter):
 
     def get_destination(self, artifact_type: str, target_repo: Path) -> Path:
         return target_repo / ".opencode" / artifact_type
+
+    def get_global_destination(self, artifact_type: str) -> Path:
+        return Path.home() / ".config" / "opencode" / artifact_type

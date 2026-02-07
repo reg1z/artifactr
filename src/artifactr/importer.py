@@ -70,13 +70,16 @@ def prompt_overwrite(path: Path) -> bool:
         return False
 
 
-def copy_with_prompt(src: Path, dst: Path, link: bool = False) -> dict[str, int]:
+def copy_with_prompt(
+    src: Path, dst: Path, link: bool = False, force: bool = False
+) -> dict[str, int]:
     """Copy or symlink files/directories with user confirmation for overwrites.
 
     Args:
         src: Source path (file or directory).
         dst: Destination path.
         link: If True, create symlinks instead of copying.
+        force: If True, skip overwrite prompts and overwrite directly.
 
     Returns:
         Dict with counts: {"copied": n, "skipped": n}
@@ -89,7 +92,7 @@ def copy_with_prompt(src: Path, dst: Path, link: bool = False) -> dict[str, int]
         dst.parent.mkdir(parents=True, exist_ok=True)
 
         if dst.exists() or dst.is_symlink():
-            if prompt_overwrite(dst):
+            if force or prompt_overwrite(dst):
                 dst.unlink()
                 if link:
                     dst.symlink_to(src.resolve())
@@ -113,7 +116,7 @@ def copy_with_prompt(src: Path, dst: Path, link: bool = False) -> dict[str, int]
                 rel_path = src_file.relative_to(src)
                 dst_file = dst / rel_path
 
-                result = copy_with_prompt(src_file, dst_file, link=link)
+                result = copy_with_prompt(src_file, dst_file, link=link, force=force)
                 copied += result["copied"]
                 skipped += result["skipped"]
 
@@ -254,6 +257,7 @@ def import_artifacts(
     tools: list[str] | None = None,
     link: bool = False,
     artifacts: list[str] | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Import artifacts from a vault into a target git repository.
 
@@ -356,7 +360,7 @@ def import_artifacts(
                 source = art["source"]
                 dest_path = tool_adapter.get_destination(artifact_type, target_path)
                 item_dest = dest_path / source.name
-                result = copy_with_prompt(source, item_dest, link=link)
+                result = copy_with_prompt(source, item_dest, link=link, force=force)
                 imported[tool_name][artifact_type] = (
                     imported[tool_name].get(artifact_type, 0) + result["copied"]
                 )
@@ -383,7 +387,7 @@ def import_artifacts(
                 artifact_count = 0
                 for item in source_path.iterdir():
                     item_dest = dest_path / item.name
-                    result = copy_with_prompt(item, item_dest, link=link)
+                    result = copy_with_prompt(item, item_dest, link=link, force=force)
                     artifact_count += result["copied"]
                     total_skipped += result["skipped"]
 
@@ -408,6 +412,225 @@ def import_artifacts(
     # Add imported paths and .art-cache to .git/info/exclude
     exclude_patterns.append(".art-cache")
     add_to_git_exclude(target_path, exclude_patterns)
+
+    return {
+        "success": True,
+        "errors": [],
+        "imported": imported,
+        "skipped": total_skipped,
+    }
+
+
+def prompt_create_directory(path: Path) -> bool:
+    """Prompt the user to create a missing directory.
+
+    Args:
+        path: Directory path that does not exist.
+
+    Returns:
+        True if user confirms creation, False otherwise.
+    """
+    try:
+        response = input(f"Directory does not exist: {path}\nCreate it? [y/N]: ")
+        if response.lower() in ("y", "yes"):
+            path.mkdir(parents=True, exist_ok=True)
+            return True
+        return False
+    except EOFError:
+        return False
+
+
+def update_global_import_cache(
+    vault_path: str,
+    vault_name: str | None,
+    tool_name: str,
+    artifact_names: list[str],
+) -> None:
+    """Update the global import tracking file at ~/.config/artifactr/.art-cache-global/imported.
+
+    Args:
+        vault_path: The vault's filesystem path.
+        vault_name: The vault's assigned name, or None.
+        tool_name: The tool the artifacts were imported for.
+        artifact_names: List of artifact names that were imported.
+    """
+    vault_label = vault_name if vault_name else Path(vault_path).name
+
+    cache_dir = Path.home() / ".config" / "artifactr" / ".art-cache-global"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    cache_file = cache_dir / "imported"
+
+    # Read existing lines to check for duplicates
+    existing_lines: set[str] = set()
+    if cache_file.is_file():
+        existing_lines = set(cache_file.read_text(encoding="utf-8").splitlines())
+
+    new_lines = []
+    for name in artifact_names:
+        line = f"{vault_label}.{tool_name}.{name}"
+        if line not in existing_lines:
+            new_lines.append(line)
+
+    if new_lines:
+        with cache_file.open("a", encoding="utf-8") as f:
+            for line in new_lines:
+                f.write(f"{line}\n")
+
+
+def import_artifacts_global(
+    vault: str | None = None,
+    tools: list[str] | None = None,
+    link: bool = False,
+    artifacts: list[str] | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Import artifacts from a vault into global config directories.
+
+    Args:
+        vault: Vault name or path to import from. Uses default vault if None.
+        tools: List of tool names to import for. Imports for all tools if None.
+        link: If True, create symlinks instead of copying files.
+        artifacts: List of artifact specifiers to import selectively.
+        force: If True, skip overwrite prompts.
+
+    Returns:
+        Result dict with keys:
+            - success: True if import succeeded, False if validation failed
+            - errors: List of error messages
+            - imported: Dict mapping tool names to artifact counts
+            - skipped: Number of files user chose not to overwrite
+    """
+    errors: list[str] = []
+    imported: dict[str, dict[str, int]] = {}
+    total_skipped = 0
+
+    # Resolve vault path
+    vault_path_str: str | None
+    if vault is None:
+        vault_path_str = get_default_vault()
+        if vault_path_str is None:
+            errors.append("Error: No default vault set. Use 'art vault add' to add a vault.")
+    else:
+        vault_path_str = get_vault_by_name_or_path(vault)
+        if vault_path_str is None:
+            errors.append("Error: Specified vault does not exist.")
+
+    # Determine which tools to use
+    supported_tools = get_supported_tools()
+    if tools is None:
+        selected_tools = supported_tools
+    else:
+        selected_tools = []
+        unsupported = []
+        for tool_name in tools:
+            if tool_name in supported_tools:
+                selected_tools.append(tool_name)
+            else:
+                unsupported.append(tool_name)
+        if unsupported:
+            errors.append(f"Error: Tools specified are not supported: {', '.join(unsupported)}")
+
+    # Return early if validation failed
+    if errors:
+        return {
+            "success": False,
+            "errors": errors,
+            "imported": {},
+            "skipped": 0,
+        }
+
+    # At this point, vault_path_str is guaranteed to be set
+    vault_path = Path(vault_path_str)
+
+    # Look up vault name for import cache
+    vault_info = list_vaults()
+    vault_display_name = vault_info["vault_names"].get(vault_path_str)
+
+    # Resolve selective artifacts if specified
+    resolved_artifacts = None
+    if artifacts is not None:
+        resolved_artifacts = resolve_artifact_names(vault_path, artifacts)
+        if not resolved_artifacts:
+            return {
+                "success": True,
+                "errors": [],
+                "imported": {},
+                "skipped": 0,
+            }
+
+    # Import artifacts for each tool
+    for tool_name in selected_tools:
+        tool_adapter = get_tool(tool_name)
+        if tool_adapter is None:
+            continue
+
+        imported[tool_name] = {}
+        imported_artifact_names: list[str] = []
+
+        if resolved_artifacts is not None:
+            # Selective import — only the resolved artifacts
+            for artifact_type in ARTIFACT_TYPES:
+                imported[tool_name][artifact_type] = 0
+
+            for art in resolved_artifacts:
+                artifact_type = art["type"]
+                source = art["source"]
+                dest_path = tool_adapter.get_global_destination(artifact_type)
+
+                # Prompt to create directory if it doesn't exist
+                if not dest_path.exists():
+                    if not prompt_create_directory(dest_path):
+                        continue
+
+                item_dest = dest_path / source.name
+                result = copy_with_prompt(source, item_dest, link=link, force=force)
+                imported[tool_name][artifact_type] = (
+                    imported[tool_name].get(artifact_type, 0) + result["copied"]
+                )
+                total_skipped += result["skipped"]
+
+                if result["copied"] > 0:
+                    imported_artifact_names.append(art["name"])
+        else:
+            # Full import — all artifacts from vault
+            for artifact_type in ARTIFACT_TYPES:
+                source_path = get_source(artifact_type, vault_path)
+
+                # Skip if source doesn't exist or is empty
+                if not source_path.exists() or not any(source_path.iterdir()):
+                    imported[tool_name][artifact_type] = 0
+                    continue
+
+                dest_path = tool_adapter.get_global_destination(artifact_type)
+
+                # Prompt to create directory if it doesn't exist
+                if not dest_path.exists():
+                    if not prompt_create_directory(dest_path):
+                        imported[tool_name][artifact_type] = 0
+                        continue
+
+                # Copy or symlink each artifact in the source directory
+                artifact_count = 0
+                for item in source_path.iterdir():
+                    item_dest = dest_path / item.name
+                    result = copy_with_prompt(item, item_dest, link=link, force=force)
+                    artifact_count += result["copied"]
+                    total_skipped += result["skipped"]
+
+                    # Track successfully imported artifact names
+                    if result["copied"] > 0:
+                        art_name = item.stem if item.is_file() else item.name
+                        imported_artifact_names.append(art_name)
+
+                imported[tool_name][artifact_type] = artifact_count
+
+        # Update global import cache for this tool
+        if imported_artifact_names:
+            update_global_import_cache(
+                vault_path_str, vault_display_name,
+                tool_name, imported_artifact_names,
+            )
 
     return {
         "success": True,
