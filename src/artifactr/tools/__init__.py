@@ -21,10 +21,16 @@ def get_supported_tools() -> list[str]:
     return list(TOOL_REGISTRY.keys())
 
 
+def get_tool_config_dirs() -> dict[str, str]:
+    """Return a mapping of tool name to config directory name."""
+    return {name: adapter.config_dir for name, adapter in TOOL_REGISTRY.items()}
+
+
 __all__ = [
     "ARTIFACT_TYPES",
     "ToolAdapter",
     "get_source",
     "get_tool",
     "get_supported_tools",
+    "get_tool_config_dirs",
 ]

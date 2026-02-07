@@ -29,6 +29,12 @@ class ToolAdapter(ABC):
         """Return the tool's identifier (e.g., 'claude-code')."""
         pass
 
+    @property
+    @abstractmethod
+    def config_dir(self) -> str:
+        """Return the tool's config directory name (e.g., '.claude')."""
+        pass
+
     @abstractmethod
     def get_destination(self, artifact_type: str, target_repo: Path) -> Path:
         """Return the destination path for an artifact type in the target repo."""

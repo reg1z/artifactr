@@ -12,6 +12,9 @@ from . import __version__
 from .catalog import (
     add_vaults,
     get_default_tool,
+    get_default_vault,
+    get_vault_by_name_or_path,
+    get_vault_hierarchy,
     list_tools_info,
     list_vaults,
     name_vault,
@@ -19,7 +22,8 @@ from .catalog import (
     select_default,
     select_default_tool,
 )
-from .importer import import_artifacts
+from .importer import copy_with_prompt, import_artifacts
+from .scanner import discover_artifacts, extract_description, load_import_cache
 from .tools import get_supported_tools
 
 
@@ -53,6 +57,10 @@ def create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Symlink vault contents instead of copying",
     )
+    import_parser.add_argument(
+        "--artifacts",
+        help="Comma-separated list of artifact names to import",
+    )
 
     # vault command with subcommands
     vault_parser = subparsers.add_parser("vault", help="Manage vaults")
@@ -79,7 +87,11 @@ def create_parser() -> argparse.ArgumentParser:
     vault_select.add_argument("path", help="Vault name or path to set as default")
 
     # vault list
-    vault_subparsers.add_parser("list", help="List all vaults")
+    vault_list = vault_subparsers.add_parser("list", help="List all vaults")
+    vault_list.add_argument(
+        "-a", "--all", action="store_true", dest="show_all",
+        help="Show full vault hierarchy with artifacts",
+    )
 
     # tool command with subcommands
     tool_parser = subparsers.add_parser("tool", help="Manage tool selection")
@@ -93,6 +105,21 @@ def create_parser() -> argparse.ArgumentParser:
 
     # tool list
     tool_subparsers.add_parser("list", help="List supported tools")
+
+    # spelunk command
+    spelunk_parser = subparsers.add_parser(
+        "spelunk", help="Discover artifacts in a target directory"
+    )
+    spelunk_parser.add_argument("target", help="Path to directory to probe")
+
+    # store command
+    store_parser = subparsers.add_parser(
+        "store", help="Store artifacts from a directory into a vault"
+    )
+    store_parser.add_argument("target_dir", help="Path to directory containing artifacts")
+    store_parser.add_argument(
+        "--vault", help="Vault to store into (default: default vault)"
+    )
 
     return parser
 
@@ -113,12 +140,18 @@ def handle_import(args: argparse.Namespace) -> int:
     else:
         tools_list = [get_default_tool()]
 
+    # Parse artifacts if provided
+    artifacts_list = None
+    if getattr(args, "artifacts", None):
+        artifacts_list = [a.strip() for a in args.artifacts.split(",")]
+
     # Perform import
     result = import_artifacts(
         target=args.target,
         vault=args.vault,
         tools=tools_list,
         link=args.link,
+        artifacts=artifacts_list,
     )
 
     if not result["success"]:
@@ -232,12 +265,11 @@ def handle_vault_list(args: argparse.Namespace) -> int:
     """Handle the vault list command.
 
     Args:
-        args: Parsed command-line arguments (unused).
+        args: Parsed command-line arguments.
 
     Returns:
         Exit code (0 for success).
     """
-    _ = args  # unused
     info = list_vaults()
 
     if not info["vaults"]:
@@ -245,6 +277,8 @@ def handle_vault_list(args: argparse.Namespace) -> int:
         return 0
 
     vault_names = info["vault_names"]
+    show_all = getattr(args, "show_all", False)
+
     print("Registered vaults:")
     for vault_path in info["vaults"]:
         name = vault_names.get(vault_path)
@@ -252,9 +286,27 @@ def handle_vault_list(args: argparse.Namespace) -> int:
         prefix = "  * " if vault_path == info["default"] else "    "
 
         if name:
-            print(f"{prefix}{name} ({vault_path}){default_marker}")
+            vault_label = f"{name} ({vault_path})"
         else:
-            print(f"{prefix}{vault_path}{default_marker}")
+            vault_label = vault_path
+
+        if show_all:
+            hierarchy = get_vault_hierarchy(vault_path)
+            if hierarchy is None:
+                print(f"{prefix}{vault_label} (path not found){default_marker}")
+            else:
+                print(f"{prefix}{vault_label}{default_marker}")
+                for art_type, items in hierarchy.items():
+                    if not items:
+                        continue
+                    print(f"      {art_type}/")
+                    for item_name in items:
+                        if art_type == "skills":
+                            print(f"        {item_name}/")
+                        else:
+                            print(f"        {item_name}")
+        else:
+            print(f"{prefix}{vault_label}{default_marker}")
 
     return 0
 
@@ -323,6 +375,174 @@ def handle_tool_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def parse_selection(selection: str, max_val: int) -> list[int]:
+    """Parse a user selection string into a list of 0-based indices.
+
+    Supports: individual numbers, comma-separated, ranges, "all", and combinations.
+
+    Args:
+        selection: User input string (e.g., "1,3-5,7" or "all").
+        max_val: Maximum valid value (1-based).
+
+    Returns:
+        Sorted list of unique 0-based indices.
+    """
+    selection = selection.strip().lower()
+    if selection == "all":
+        return list(range(max_val))
+
+    indices = set()
+    for part in selection.split(","):
+        part = part.strip()
+        if "-" in part:
+            start_str, end_str = part.split("-", 1)
+            try:
+                start = int(start_str.strip())
+                end = int(end_str.strip())
+                for i in range(start, end + 1):
+                    if 1 <= i <= max_val:
+                        indices.add(i - 1)
+            except ValueError:
+                continue
+        else:
+            try:
+                val = int(part)
+                if 1 <= val <= max_val:
+                    indices.add(val - 1)
+            except ValueError:
+                continue
+
+    return sorted(indices)
+
+
+def handle_spelunk(args: argparse.Namespace) -> int:
+    """Handle the spelunk command.
+
+    Args:
+        args: Parsed command-line arguments.
+
+    Returns:
+        Exit code (0 for success, 1 for error).
+    """
+    from pathlib import Path
+
+    target = Path(args.target).resolve()
+
+    if not target.exists() or not target.is_dir():
+        print(f"Error: Target directory does not exist: {args.target}", file=sys.stderr)
+        return 1
+
+    artifacts = discover_artifacts(target)
+
+    if not artifacts:
+        print(f"No artifacts found in {args.target}")
+        return 0
+
+    # Load import cache
+    import_cache = load_import_cache(target)
+
+    # Build table rows
+    rows = []
+    for art in artifacts:
+        name_col = art["name"]
+
+        # Check import cache
+        if art["name"] in import_cache:
+            vault_names = ", ".join(import_cache[art["name"]])
+            name_col += f" (imported: {vault_names})"
+
+        description = extract_description(art)
+        tool_label = art["config_dir"].lstrip(".")
+        rows.append((name_col, art["type"], tool_label, description))
+
+    # Calculate column widths
+    headers = ("NAME", "TYPE", "TOOL", "DESCRIPTION")
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for i, val in enumerate(row):
+            widths[i] = max(widths[i], len(val))
+
+    # Print table
+    fmt = "  ".join(f"{{:<{w}}}" for w in widths)
+    print(fmt.format(*headers))
+    for row in rows:
+        print(fmt.format(*row))
+
+    return 0
+
+
+def handle_store(args: argparse.Namespace) -> int:
+    """Handle the store command.
+
+    Args:
+        args: Parsed command-line arguments.
+
+    Returns:
+        Exit code (0 for success, 1 for error).
+    """
+    from pathlib import Path
+
+    target = Path(args.target_dir).resolve()
+
+    if not target.exists() or not target.is_dir():
+        print(f"Error: Target directory does not exist: {args.target_dir}", file=sys.stderr)
+        return 1
+
+    # Resolve vault
+    vault_identifier = getattr(args, "vault", None)
+    if vault_identifier:
+        vault_path_str = get_vault_by_name_or_path(vault_identifier)
+        if vault_path_str is None:
+            print(f"Error: Vault not in catalog: {vault_identifier}", file=sys.stderr)
+            return 1
+    else:
+        vault_path_str = get_default_vault()
+        if vault_path_str is None:
+            print("Error: No default vault set. Use 'art vault add' to add a vault.", file=sys.stderr)
+            return 1
+
+    vault_path = Path(vault_path_str)
+
+    # Get vault display name
+    vault_info = list_vaults()
+    vault_display_name = vault_info["vault_names"].get(vault_path_str, vault_path.name)
+
+    # Discover artifacts
+    artifacts = discover_artifacts(target)
+
+    if not artifacts:
+        print(f"No artifacts found in {args.target_dir}")
+        return 0
+
+    # Display numbered list
+    print(f"Discovered artifacts in {target}:")
+    for i, art in enumerate(artifacts, 1):
+        rel_path = art["path"].relative_to(target)
+        print(f"  {i}. {art['name']} ({art['type']}) - {rel_path}")
+
+    # Prompt for selection
+    try:
+        selection = input(f"\nSelect artifacts to store [1-{len(artifacts)}, all]: ")
+    except EOFError:
+        return 0
+
+    indices = parse_selection(selection, len(artifacts))
+    if not indices:
+        return 0
+
+    stored_count = 0
+    for idx in indices:
+        art = artifacts[idx]
+        dest = vault_path / art["type_plural"] / (art["path"].name if art["type"] == "skill" else art["path"].name)
+        result = copy_with_prompt(art["path"], dest)
+        if result["copied"] > 0:
+            print(f"Stored: {art['name']} ({art['type']}) -> {dest}")
+            stored_count += 1
+
+    print(f"\n{stored_count} artifact(s) stored to vault: {vault_display_name}")
+    return 0
+
+
 def main() -> int:
     """Main entry point for the CLI.
 
@@ -366,6 +586,12 @@ def main() -> int:
             return handle_tool_select(args)
         if args.tool_command == "list":
             return handle_tool_list(args)
+
+    if args.command == "spelunk":
+        return handle_spelunk(args)
+
+    if args.command == "store":
+        return handle_store(args)
 
     return 0
 

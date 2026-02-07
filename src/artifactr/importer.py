@@ -4,10 +4,11 @@ This module handles importing artifacts from vaults into target git repositories
 """
 
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
-from .catalog import get_default_vault, get_vault_by_name_or_path
+from .catalog import get_default_vault, get_vault_by_name_or_path, list_vaults
 from .tools import ARTIFACT_TYPES, get_source, get_supported_tools, get_tool
 from .utils import is_git_repo
 
@@ -119,11 +120,140 @@ def copy_with_prompt(src: Path, dst: Path, link: bool = False) -> dict[str, int]
     return {"copied": copied, "skipped": skipped}
 
 
+def update_import_cache(
+    target: Path,
+    vault_path: str,
+    vault_name: str | None,
+    tool_name: str,
+    artifact_names: list[str],
+) -> None:
+    """Update the .art-cache/imported tracking file.
+
+    Args:
+        target: Path to the target directory.
+        vault_path: The vault's filesystem path.
+        vault_name: The vault's assigned name, or None.
+        tool_name: The tool the artifacts were imported for.
+        artifact_names: List of artifact names that were imported.
+    """
+    vault_label = vault_name if vault_name else Path(vault_path).name
+
+    cache_dir = target / ".art-cache"
+    cache_dir.mkdir(exist_ok=True)
+
+    cache_file = cache_dir / "imported"
+
+    # Read existing lines to check for duplicates
+    existing_lines: set[str] = set()
+    if cache_file.is_file():
+        existing_lines = set(cache_file.read_text(encoding="utf-8").splitlines())
+
+    new_lines = []
+    for name in artifact_names:
+        line = f"{vault_label}.{tool_name}.{name}"
+        if line not in existing_lines:
+            new_lines.append(line)
+
+    if new_lines:
+        with cache_file.open("a", encoding="utf-8") as f:
+            for line in new_lines:
+                f.write(f"{line}\n")
+
+
+def resolve_artifact_names(
+    vault_path: Path, artifact_specs: list[str]
+) -> list[dict]:
+    """Resolve artifact specifiers to actual artifacts in a vault.
+
+    Args:
+        vault_path: Path to the vault directory.
+        artifact_specs: List of artifact specifiers (e.g., ["helping-hand", "skills/write-thing"]).
+
+    Returns:
+        List of dicts with keys: name, type, source.
+    """
+    resolved = []
+
+    for spec in artifact_specs:
+        if "/" in spec:
+            # Type-prefixed specifier
+            type_prefix, name = spec.split("/", 1)
+            matches = []
+            if type_prefix == "skills" and (vault_path / "skills" / name).is_dir():
+                matches.append({
+                    "name": name,
+                    "type": "skills",
+                    "source": vault_path / "skills" / name,
+                })
+            elif type_prefix == "agents" and (vault_path / "agents" / f"{name}.md").is_file():
+                matches.append({
+                    "name": name,
+                    "type": "agents",
+                    "source": vault_path / "agents" / f"{name}.md",
+                })
+            elif type_prefix == "commands" and (vault_path / "commands" / f"{name}.md").is_file():
+                matches.append({
+                    "name": name,
+                    "type": "commands",
+                    "source": vault_path / "commands" / f"{name}.md",
+                })
+
+            if not matches:
+                print(f"Error: Artifact not found: {spec}", file=sys.stderr)
+                continue
+            resolved.extend(matches)
+        else:
+            # Unqualified name — search all types
+            matches = []
+            if (vault_path / "skills" / spec).is_dir():
+                matches.append({
+                    "name": spec,
+                    "type": "skills",
+                    "source": vault_path / "skills" / spec,
+                })
+            if (vault_path / "agents" / f"{spec}.md").is_file():
+                matches.append({
+                    "name": spec,
+                    "type": "agents",
+                    "source": vault_path / "agents" / f"{spec}.md",
+                })
+            if (vault_path / "commands" / f"{spec}.md").is_file():
+                matches.append({
+                    "name": spec,
+                    "type": "commands",
+                    "source": vault_path / "commands" / f"{spec}.md",
+                })
+
+            if not matches:
+                print(f"Error: Artifact not found: {spec}", file=sys.stderr)
+                continue
+            elif len(matches) == 1:
+                resolved.append(matches[0])
+            else:
+                # Ambiguous — prompt user
+                print(f'Ambiguous artifact name: "{spec}"')
+                print("Found in multiple types:")
+                for i, m in enumerate(matches, 1):
+                    print(f"  {i}. {m['type']}/{m['name']}")
+                try:
+                    choice = input(f"Select one [1-{len(matches)}]: ")
+                    idx = int(choice) - 1
+                    if 0 <= idx < len(matches):
+                        resolved.append(matches[idx])
+                    else:
+                        print(f"Invalid selection, skipping: {spec}", file=sys.stderr)
+                except (EOFError, ValueError):
+                    print(f"Skipping: {spec}", file=sys.stderr)
+
+    return resolved
+
+
 def import_artifacts(
     target: str,
     vault: str | None = None,
     tools: list[str] | None = None,
     link: bool = False,
+    artifacts: list[str] | None = None,
 ) -> dict[str, Any]:
     """Import artifacts from a vault into a target git repository.
 
@@ -191,6 +321,22 @@ def import_artifacts(
     # At this point, vault_path_str is guaranteed to be set
     vault_path = Path(vault_path_str)
 
+    # Look up vault name for import cache
+    vault_info = list_vaults()
+    vault_display_name = vault_info["vault_names"].get(vault_path_str)
+
+    # Resolve selective artifacts if specified
+    resolved_artifacts = None
+    if artifacts is not None:
+        resolved_artifacts = resolve_artifact_names(vault_path, artifacts)
+        if not resolved_artifacts:
+            return {
+                "success": True,
+                "errors": [],
+                "imported": {},
+                "skipped": 0,
+            }
+
     # Import artifacts for each tool
     for tool_name in selected_tools:
         tool_adapter = get_tool(tool_name)
@@ -198,34 +344,70 @@ def import_artifacts(
             continue
 
         imported[tool_name] = {}
+        imported_artifact_names: list[str] = []
 
-        for artifact_type in ARTIFACT_TYPES:
-            source_path = get_source(artifact_type, vault_path)
-
-            # Skip if source doesn't exist or is empty
-            if not source_path.exists() or not any(source_path.iterdir()):
+        if resolved_artifacts is not None:
+            # Selective import — only the resolved artifacts
+            for artifact_type in ARTIFACT_TYPES:
                 imported[tool_name][artifact_type] = 0
-                continue
 
-            dest_path = tool_adapter.get_destination(artifact_type, target_path)
-
-            # Copy or symlink each artifact in the source directory
-            artifact_count = 0
-            for item in source_path.iterdir():
-                item_dest = dest_path / item.name
-                result = copy_with_prompt(item, item_dest, link=link)
-                artifact_count += result["copied"]
+            for art in resolved_artifacts:
+                artifact_type = art["type"]
+                source = art["source"]
+                dest_path = tool_adapter.get_destination(artifact_type, target_path)
+                item_dest = dest_path / source.name
+                result = copy_with_prompt(source, item_dest, link=link)
+                imported[tool_name][artifact_type] = (
+                    imported[tool_name].get(artifact_type, 0) + result["copied"]
+                )
                 total_skipped += result["skipped"]
 
-                # Track pattern for git exclude (relative to repo root)
+                if result["copied"] > 0:
+                    imported_artifact_names.append(art["name"])
+
                 rel_dest = item_dest.relative_to(target_path)
                 exclude_patterns.append(str(rel_dest))
+        else:
+            # Full import — all artifacts from vault
+            for artifact_type in ARTIFACT_TYPES:
+                source_path = get_source(artifact_type, vault_path)
 
-            imported[tool_name][artifact_type] = artifact_count
+                # Skip if source doesn't exist or is empty
+                if not source_path.exists() or not any(source_path.iterdir()):
+                    imported[tool_name][artifact_type] = 0
+                    continue
 
-    # Add imported paths to .git/info/exclude
-    if exclude_patterns:
-        add_to_git_exclude(target_path, exclude_patterns)
+                dest_path = tool_adapter.get_destination(artifact_type, target_path)
+
+                # Copy or symlink each artifact in the source directory
+                artifact_count = 0
+                for item in source_path.iterdir():
+                    item_dest = dest_path / item.name
+                    result = copy_with_prompt(item, item_dest, link=link)
+                    artifact_count += result["copied"]
+                    total_skipped += result["skipped"]
+
+                    # Track successfully imported artifact names
+                    if result["copied"] > 0:
+                        art_name = item.stem if item.is_file() else item.name
+                        imported_artifact_names.append(art_name)
+
+                    # Track pattern for git exclude (relative to repo root)
+                    rel_dest = item_dest.relative_to(target_path)
+                    exclude_patterns.append(str(rel_dest))
+
+                imported[tool_name][artifact_type] = artifact_count
+
+        # Update import cache for this tool
+        if imported_artifact_names:
+            update_import_cache(
+                target_path, vault_path_str, vault_display_name,
+                tool_name, imported_artifact_names,
+            )
+
+    # Add imported paths and .art-cache to .git/info/exclude
+    exclude_patterns.append(".art-cache")
+    add_to_git_exclude(target_path, exclude_patterns)
 
     return {
         "success": True,

@@ -12,5 +12,9 @@ class ClaudeCodeAdapter(ToolAdapter):
     def name(self) -> str:
         return "claude-code"
 
+    @property
+    def config_dir(self) -> str:
+        return ".claude"
+
     def get_destination(self, artifact_type: str, target_repo: Path) -> Path:
         return target_repo / ".claude" / artifact_type

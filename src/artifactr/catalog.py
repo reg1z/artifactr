@@ -238,6 +238,34 @@ def name_vault(identifier: str, name: str) -> dict[str, Any]:
     return {"success": True, "vault_path": resolved, "error": None}
 
 
+def get_vault_hierarchy(vault_path: str) -> dict | None:
+    """Get the artifact hierarchy for a vault.
+
+    Args:
+        vault_path: Path to the vault directory.
+
+    Returns:
+        Dict mapping artifact types to lists of names, or None if path doesn't exist.
+    """
+    path = Path(vault_path)
+    if not path.exists():
+        return None
+
+    hierarchy = {}
+    for artifact_type in ["skills", "agents", "commands"]:
+        type_path = path / artifact_type
+        items = []
+        if type_path.is_dir():
+            for item in sorted(type_path.iterdir()):
+                if artifact_type == "skills" and item.is_dir():
+                    items.append(item.name)
+                elif artifact_type in ("agents", "commands") and item.is_file() and item.suffix == ".md":
+                    items.append(item.name)
+        hierarchy[artifact_type] = items
+
+    return hierarchy
+
+
 def select_default_tool(tool_name: str, supported_tools: list[str]) -> bool:
     """Set a tool as the default.
 
