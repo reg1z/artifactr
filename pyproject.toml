@@ -18,3 +18,7 @@ art = "artifactr.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[project.urls]
+Homepage = "https://github.com/reg1z/artifactr"
+Issues = "https://github.com/reg1z/artifactr/issues"
