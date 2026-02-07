@@ -21,9 +21,7 @@ A cross-platform CLI tool inspired by Obsidian for managing AI project artifacts
 Requires Python 3.
 
 ```sh
-git clone https://github.com/reg1z/artifactr
-cd artifactr
-pip install .
+pip install artifactr
 ```
 
 ## Usage
