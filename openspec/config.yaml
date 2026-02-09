@@ -1,0 +1,7 @@
+schema: spec-driven
+
+context: |
+  Tech stack: Python 3, argparse, pathlib, PyYAML (only external dependency)
+  CLI entry point: `art` command (routes to `artifactr.cli:main`)
+  Conventions: type hints, decoupled logic (program logic separate from CLI handlers)
+  Domain: Cross-platform CLI tool for managing AI project artifacts across vaults
