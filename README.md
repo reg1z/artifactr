@@ -22,8 +22,14 @@ A cross-platform CLI tool inspired by Obsidian for managing AI project artifacts
 
 ## Installation
 
-Requires Python 3.
+Requires Python 3.10+
 
+It's easiest to globally install `artifactr` via `pipx`:
+```sh
+pipx install artifactr
+```
+
+Otherwise, you can install via `pip` (though it's recommended to use a non-system venv):
 ```sh
 pip install artifactr
 ```
