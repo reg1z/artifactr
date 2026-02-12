@@ -15,6 +15,7 @@ from .catalog import (
     get_default_vault,
     get_vault_by_name_or_path,
     get_vault_hierarchy,
+    init_vault,
     list_tools_info,
     list_vaults,
     name_vault,
@@ -22,10 +23,10 @@ from .catalog import (
     select_default,
     select_default_tool,
 )
-from .creator import create_skill, resolve_project_target, resolve_vault_target
+from .creator import create_artifact, create_skill, resolve_edit_target, resolve_project_target, resolve_vault_target
 from .importer import copy_with_prompt, import_artifacts, import_artifacts_global
 from .scanner import discover_artifacts, extract_description, load_import_cache
-from .tools import get_supported_tools
+from .tools import get_aliases_for_tool, get_supported_tools, resolve_tool_name
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -88,6 +89,23 @@ def create_parser() -> argparse.ArgumentParser:
     vault_add.add_argument(
         "--name", help="Name for the vault (only when adding a single vault)"
     )
+    vault_add.add_argument(
+        "--set-default", action="store_true",
+        help="Set the added vault as the default",
+    )
+
+    # vault init
+    vault_init = vault_subparsers.add_parser(
+        "init", help="Initialize a new vault directory"
+    )
+    vault_init.add_argument("target_dir", help="Path to the vault directory")
+    vault_init.add_argument(
+        "--name", help="Name for the vault",
+    )
+    vault_init.add_argument(
+        "--set-default", action="store_true",
+        help="Set the initialized vault as the default",
+    )
 
     # vault rm
     vault_rm = vault_subparsers.add_parser("rm", help="Remove vaults from catalog")
@@ -137,6 +155,27 @@ def create_parser() -> argparse.ArgumentParser:
         "--vault", help="Vault to store into (default: default vault)"
     )
 
+    # edit command
+    edit_parser = subparsers.add_parser("edit", help="Edit an artifact in your editor")
+    edit_parser.add_argument(
+        "artifact_type", choices=["skill", "agent", "command"],
+        help="Type of artifact to edit",
+    )
+    edit_parser.add_argument(
+        "artifact_name", help="Name of the artifact to edit",
+    )
+    edit_parser.add_argument(
+        "--vault", help="Target vault (name or path)",
+    )
+    edit_parser.add_argument(
+        "-H", "--here", action="store_true",
+        help="Edit in current project instead of vault",
+    )
+    edit_parser.add_argument(
+        "--tools",
+        help="Comma-separated tool list (used with --here)",
+    )
+
     # create command with subcommands
     create_parser = subparsers.add_parser("create", help="Create new artifacts")
     create_subparsers = create_parser.add_subparsers(dest="create_command")
@@ -170,6 +209,64 @@ def create_parser() -> argparse.ArgumentParser:
         "--vault", help="Target vault (name or path)",
     )
     create_skill_parser.add_argument(
+        "--tools",
+        help="Comma-separated tool list (used with --here)",
+    )
+
+    # create command
+    create_command_parser = create_subparsers.add_parser(
+        "command", help="Create a new command"
+    )
+    create_command_parser.add_argument(
+        "command_name", help="Command identifier (filename)"
+    )
+    create_command_parser.add_argument(
+        "-d", "--description", help="Command description",
+    )
+    create_command_parser.add_argument(
+        "-c", "--content", help="Markdown body content",
+    )
+    create_command_parser.add_argument(
+        "-D", "--field", action="append", default=[],
+        help="Additional frontmatter field as key=value (repeatable)",
+    )
+    create_command_parser.add_argument(
+        "-H", "--here", action="store_true",
+        help="Create in current project instead of vault",
+    )
+    create_command_parser.add_argument(
+        "--vault", help="Target vault (name or path)",
+    )
+    create_command_parser.add_argument(
+        "--tools",
+        help="Comma-separated tool list (used with --here)",
+    )
+
+    # create agent
+    create_agent_parser = create_subparsers.add_parser(
+        "agent", help="Create a new agent"
+    )
+    create_agent_parser.add_argument(
+        "agent_name", help="Agent identifier"
+    )
+    create_agent_parser.add_argument(
+        "-d", "--description", help="Agent description",
+    )
+    create_agent_parser.add_argument(
+        "-c", "--content", help="Markdown body content",
+    )
+    create_agent_parser.add_argument(
+        "-D", "--field", action="append", default=[],
+        help="Additional frontmatter field as key=value (repeatable)",
+    )
+    create_agent_parser.add_argument(
+        "-H", "--here", action="store_true",
+        help="Create in current project instead of vault",
+    )
+    create_agent_parser.add_argument(
+        "--vault", help="Target vault (name or path)",
+    )
+    create_agent_parser.add_argument(
         "--tools",
         help="Comma-separated tool list (used with --here)",
     )
@@ -272,16 +369,25 @@ def handle_vault_add(args: argparse.Namespace) -> int:
         Exit code (0 for success, 1 for error).
     """
     name = getattr(args, "name", None)
+    set_default = getattr(args, "set_default", False)
+
     if name and len(args.paths) > 1:
         print("Error: --name can only be used when adding a single vault.", file=sys.stderr)
         return 1
 
     result = add_vaults(args.paths, name=name)
+    assigned_names = result.get("names", {})
 
     # Print results
     for path in result["added"]:
-        vault_label = f"{name} ({path})" if name and path == result["added"][0] else path
-        print(f"Added vault: {vault_label}")
+        vault_name = assigned_names.get(path, name)
+        if vault_name:
+            print(f"Added vault: {vault_name} ({path})")
+            if not name:
+                # Auto-named — show rename hint
+                print(f"  To rename this vault: art vault name {vault_name} <new-name>")
+        else:
+            print(f"Added vault: {path}")
 
     for path in result["skipped"]:
         print(f"Vault already registered: {path}")
@@ -295,7 +401,48 @@ def handle_vault_add(args: argparse.Namespace) -> int:
         if info["default"] and info["default"] in result["added"]:
             print(f"Set as default vault: {info['default']}")
 
+    # Handle --set-default
+    if set_default and result["added"]:
+        select_default(result["added"][0])
+        print(f"Set as default vault: {result['added'][0]}")
+
     return 1 if result["errors"] else 0
+
+
+def handle_vault_init(args: argparse.Namespace) -> int:
+    """Handle the vault init command.
+
+    Args:
+        args: Parsed command-line arguments.
+
+    Returns:
+        Exit code (0 for success, 1 for error).
+    """
+    name = getattr(args, "name", None)
+    set_default = getattr(args, "set_default", False)
+
+    result = init_vault(args.target_dir, name=name)
+    assigned_names = result.get("names", {})
+
+    if result["errors"]:
+        for error in result["errors"]:
+            print(error, file=sys.stderr)
+        return 1
+
+    if result["added"]:
+        path = result["added"][0]
+        vault_name = assigned_names.get(path, name or "")
+        action = "Initialized" if result.get("created") else "Registered"
+        print(f"{action} vault: {vault_name} ({path})")
+        print(f"  To rename this vault: art vault name {vault_name} <new-name>")
+
+        if set_default:
+            select_default(path)
+            print(f"Set as default vault: {path}")
+    elif result["skipped"]:
+        print(f"Vault already registered: {result['skipped'][0]}")
+
+    return 0
 
 
 def handle_vault_rm(args: argparse.Namespace) -> int:
@@ -441,10 +588,12 @@ def handle_tool_list(args: argparse.Namespace) -> int:
 
     print("Supported tools:")
     for tool_name in info["tools"]:
+        aliases = get_aliases_for_tool(tool_name)
+        alias_str = f" (alias: {', '.join(aliases)})" if aliases else ""
         if tool_name == info["default"]:
-            print(f"  * {tool_name} (default)")
+            print(f"  * {tool_name}{alias_str} (default)")
         else:
-            print(f"    {tool_name}")
+            print(f"    {tool_name}{alias_str}")
 
     return 0
 
@@ -572,7 +721,7 @@ def handle_store(args: argparse.Namespace) -> int:
     else:
         vault_path_str = get_default_vault()
         if vault_path_str is None:
-            print("Error: No default vault set. Use 'art vault add' to add a vault.", file=sys.stderr)
+            print("Error: No default vault set. Use 'art vault add' or 'art vault init' to set up a vault.", file=sys.stderr)
             return 1
 
     vault_path = Path(vault_path_str)
@@ -617,11 +766,8 @@ def handle_store(args: argparse.Namespace) -> int:
     return 0
 
 
-def handle_create_skill(args: argparse.Namespace) -> int:
-    """Handle the create skill command.
-
-    Requires at least --description to create a skill. All creation is
-    flag-based (non-interactive).
+def handle_edit(args: argparse.Namespace) -> int:
+    """Handle the edit command.
 
     Args:
         args: Parsed command-line arguments.
@@ -629,8 +775,67 @@ def handle_create_skill(args: argparse.Namespace) -> int:
     Returns:
         Exit code (0 for success, 1 for error).
     """
-    skill_name = args.skill_name
-    display_name = getattr(args, "display_name", None) or skill_name
+    import subprocess
+
+    from .utils import get_editor
+
+    artifact_type = args.artifact_type
+    artifact_name = args.artifact_name
+    vault = getattr(args, "vault", None)
+    here = getattr(args, "here", False)
+    tools_str = getattr(args, "tools", None)
+
+    tools_list = None
+    if tools_str:
+        tools_list = [t.strip() for t in tools_str.split(",")]
+
+    resolution = resolve_edit_target(
+        artifact_type=artifact_type,
+        artifact_name=artifact_name,
+        vault=vault,
+        here=here,
+        tools=tools_list,
+    )
+
+    if not resolution["success"]:
+        print(f"Error: {resolution['error']}", file=sys.stderr)
+        return 1
+
+    editor = get_editor()
+    if editor is None:
+        print(
+            "Error: No editor found. Set $EDITOR or install nano, neovim, vim, or vi.",
+            file=sys.stderr,
+        )
+        return 1
+
+    result = subprocess.run([editor, str(resolution["path"])])
+    return result.returncode
+
+
+def handle_create_artifact(args: argparse.Namespace, artifact_type: str) -> int:
+    """Handle create skill/command/agent commands.
+
+    Requires at least --description. All creation is flag-based (non-interactive).
+
+    Args:
+        args: Parsed command-line arguments.
+        artifact_type: One of "skill", "command", "agent".
+
+    Returns:
+        Exit code (0 for success, 1 for error).
+    """
+    # Get the artifact name from the type-specific positional
+    if artifact_type == "skill":
+        artifact_name = args.skill_name
+        display_name = getattr(args, "display_name", None) or artifact_name
+    elif artifact_type == "command":
+        artifact_name = args.command_name
+        display_name = artifact_name
+    else:  # agent
+        artifact_name = args.agent_name
+        display_name = artifact_name
+
     description = getattr(args, "description", None)
     content = getattr(args, "content", None)
     field_flags = getattr(args, "field", []) or []
@@ -640,8 +845,8 @@ def handle_create_skill(args: argparse.Namespace) -> int:
 
     if description is None:
         print(
-            "Error: --description / -d is required.\n"
-            "Usage: art create skill <name> -d \"description\" [-c content] [-D key=value ...]",
+            f"Error: --description / -d is required.\n"
+            f'Usage: art create {artifact_type} <name> -d "description" [-c content] [-D key=value ...]',
             file=sys.stderr,
         )
         return 1
@@ -655,29 +860,30 @@ def handle_create_skill(args: argparse.Namespace) -> int:
         key, value = field_str.split("=", 1)
         extra_fields[key] = value
 
-    # Resolve targets and create
+    # Resolve targets
     if here:
         tools_list = None
         if tools_str:
             tools_list = [t.strip() for t in tools_str.split(",")]
 
-        resolution = resolve_project_target(skill_name, tools=tools_list)
+        resolution = resolve_project_target(artifact_name, artifact_type=artifact_type, tools=tools_list)
         if not resolution["success"]:
             print(f"Error: {resolution['error']}", file=sys.stderr)
             return 1
 
         targets = resolution["paths"]
     else:
-        resolution = resolve_vault_target(skill_name, vault=vault)
+        resolution = resolve_vault_target(artifact_name, artifact_type=artifact_type, vault=vault)
         if not resolution["success"]:
             print(f"Error: {resolution['error']}", file=sys.stderr)
             return 1
 
         targets = [resolution["path"]]
 
-    # Create skill at each target
+    # Create artifact at each target
     for target_path in targets:
-        result = create_skill(
+        result = create_artifact(
+            artifact_type=artifact_type,
             name=display_name,
             description=description,
             content=content,
@@ -687,9 +893,14 @@ def handle_create_skill(args: argparse.Namespace) -> int:
         if not result["success"]:
             print(f"Error: {result['error']}", file=sys.stderr)
             return 1
-        print(f"Created skill: {result['path']}")
+        print(f"Created {artifact_type}: {result['path']}")
 
     return 0
+
+
+def handle_create_skill(args: argparse.Namespace) -> int:
+    """Handle the create skill command."""
+    return handle_create_artifact(args, "skill")
 
 
 def main() -> int:
@@ -716,6 +927,8 @@ def main() -> int:
 
         if args.vault_command == "add":
             return handle_vault_add(args)
+        if args.vault_command == "init":
+            return handle_vault_init(args)
         if args.vault_command == "rm":
             return handle_vault_rm(args)
         if args.vault_command == "name":
@@ -742,6 +955,9 @@ def main() -> int:
     if args.command == "store":
         return handle_store(args)
 
+    if args.command == "edit":
+        return handle_edit(args)
+
     if args.command == "create":
         if args.create_command is None:
             parser.parse_args(["create", "--help"])
@@ -749,6 +965,10 @@ def main() -> int:
 
         if args.create_command == "skill":
             return handle_create_skill(args)
+        if args.create_command == "command":
+            return handle_create_artifact(args, "command")
+        if args.create_command == "agent":
+            return handle_create_artifact(args, "agent")
 
     return 0
 

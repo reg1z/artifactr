@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .catalog import get_default_vault, get_vault_by_name_or_path, list_vaults
-from .tools import ARTIFACT_TYPES, get_source, get_supported_tools, get_tool
+from .tools import ARTIFACT_TYPES, get_source, get_supported_tools, get_tool, resolve_tool_name
 from .utils import is_git_repo
 
 
@@ -292,13 +292,13 @@ def import_artifacts(
     if vault is None:
         vault_path_str = get_default_vault()
         if vault_path_str is None:
-            errors.append("Error: No default vault set. Use 'art vault add' to add a vault.")
+            errors.append("Error: No default vault set. Use 'art vault add' or 'art vault init' to set up a vault.")
     else:
         vault_path_str = get_vault_by_name_or_path(vault)
         if vault_path_str is None:
             errors.append("Error: Specified vault does not exist.")
 
-    # Determine which tools to use
+    # Determine which tools to use (resolve aliases first)
     supported_tools = get_supported_tools()
     if tools is None:
         selected_tools = supported_tools
@@ -306,8 +306,9 @@ def import_artifacts(
         selected_tools = []
         unsupported = []
         for tool_name in tools:
-            if tool_name in supported_tools:
-                selected_tools.append(tool_name)
+            resolved_name = resolve_tool_name(tool_name)
+            if resolved_name in supported_tools:
+                selected_tools.append(resolved_name)
             else:
                 unsupported.append(tool_name)
         if unsupported:
@@ -510,13 +511,13 @@ def import_artifacts_global(
     if vault is None:
         vault_path_str = get_default_vault()
         if vault_path_str is None:
-            errors.append("Error: No default vault set. Use 'art vault add' to add a vault.")
+            errors.append("Error: No default vault set. Use 'art vault add' or 'art vault init' to set up a vault.")
     else:
         vault_path_str = get_vault_by_name_or_path(vault)
         if vault_path_str is None:
             errors.append("Error: Specified vault does not exist.")
 
-    # Determine which tools to use
+    # Determine which tools to use (resolve aliases first)
     supported_tools = get_supported_tools()
     if tools is None:
         selected_tools = supported_tools
@@ -524,8 +525,9 @@ def import_artifacts_global(
         selected_tools = []
         unsupported = []
         for tool_name in tools:
-            if tool_name in supported_tools:
-                selected_tools.append(tool_name)
+            resolved_name = resolve_tool_name(tool_name)
+            if resolved_name in supported_tools:
+                selected_tools.append(resolved_name)
             else:
                 unsupported.append(tool_name)
         if unsupported:

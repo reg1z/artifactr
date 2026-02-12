@@ -7,11 +7,15 @@ A cross-platform CLI tool inspired by Obsidian for managing AI project artifacts
 
 - **Tool-agnostic storage**: Store artifacts once, import to multiple AI tools
 - **Cross-platform**: Works on Linux, macOS, and Windows
-- **Multiple vaults**: Organize artifacts into separate collections with optional names
+- **Multiple vaults**: Organize artifacts into separate collections with auto-naming (`llm-vault-N`)
+- **Vault initialization**: Create new vaults from scratch with `art vault init`
+- **Artifact creation**: Create skills, commands, and agents from the CLI with `art create`
+- **Artifact editing**: Open artifacts in your terminal editor with `art edit`
 - **Selective import**: Import specific artifacts by name with `--artifacts`
 - **Artifact discovery**: Scan any project for existing artifacts with `art spelunk`
 - **Artifact collection**: Store discovered artifacts back into a vault with `art store`
 - **Import tracking**: `.art-cache/imported` records what was imported and from where
+- **Tool aliases**: Use `claude` as shorthand for `claude-code` anywhere a tool name is accepted
 - **Supported tools**: Claude Code, OpenCode (extensible for more)
 - **Automatic git exclusion**: Adds imported artifacts to `.git/info/exclude` to protect against accidental commits of project-specific skills & prompts
 
@@ -29,11 +33,20 @@ pip install artifactr
 ### Managing Vaults
 
 ```sh
-# Add a vault
+# Initialize a new vault (creates directory with skills/, agents/, commands/ scaffolding)
+art vault init ~/my-vault
+
+# Initialize with a name and set as default
+art vault init ~/my-vault --name=favorites --set-default
+
+# Add an existing directory as a vault (auto-named as llm-vault-1, llm-vault-2, etc.)
 art vault add ~/my-vault
 
-# Add a vault with a name
+# Add a vault with an explicit name
 art vault add ~/my-vault --name=favorites
+
+# Add and set as default in one step
+art vault add ~/my-vault --name=favorites --set-default
 
 # Name or rename an existing vault
 art vault name ~/my-vault favorites
@@ -51,16 +64,19 @@ art vault select favorites
 art vault rm favorites
 ```
 
-Vault names can be used in place of full directory paths in any command that accepts a vault identifier, including `--vault` on `art import`.
+Vaults added without `--name` are automatically assigned names using the `llm-vault-N` pattern. Vault names can be used in place of full directory paths in any command that accepts a vault identifier, including `--vault` on `art import`.
 
 ### Managing Tools
 
 ```sh
-# List supported tools and see current default
+# List supported tools and see current default (shows aliases too)
 art tool list
 
 # Set default tool (defaults to opencode)
 art tool select claude-code
+
+# Aliases work anywhere a tool name is accepted
+art tool select claude  # resolves to claude-code
 ```
 
 ### Importing Artifacts
@@ -86,6 +102,54 @@ art import ~/repos/my-project --vault=favorites --artifacts=helping-hand --link
 ```
 
 Imported artifacts are tracked in `.art-cache/imported` within the target directory, recording which vault and tool each artifact came from.
+
+### Creating Artifacts
+
+Create skills, commands, and agents directly from the CLI:
+
+```sh
+# Create a skill (directory-based, with SKILL.md)
+art create skill my-skill -d "A helpful skill" -c "Instructions here"
+
+# Create a command (flat .md file, filename is the name)
+art create command deploy-prod -d "Run production deployment"
+
+# Create an agent (flat .md file, name in frontmatter)
+art create agent code-reviewer -d "Reviews code changes"
+
+# Add extra frontmatter fields
+art create agent my-agent -d "desc" -D model=sonnet -D version=1.0
+
+# Create in a specific vault
+art create skill my-skill -d "desc" --vault=favorites
+
+# Create in the current project instead of a vault
+art create command my-cmd -d "desc" --here
+art create skill my-skill -d "desc" --here --tools=claude-code,opencode
+```
+
+All artifact types require `--description` / `-d`. Skills are created as directories with a `SKILL.md` file; commands and agents are created as flat `.md` files.
+
+### Editing Artifacts
+
+Open an artifact in your terminal editor:
+
+```sh
+# Edit a skill in the default vault
+art edit skill my-skill
+
+# Edit a command or agent
+art edit command deploy-prod
+art edit agent code-reviewer
+
+# Edit in a specific vault
+art edit skill my-skill --vault=favorites
+
+# Edit a project-local artifact
+art edit skill my-skill --here
+```
+
+The editor is resolved from `$VISUAL`, then `$EDITOR`, then the first available of `nano`, `nvim`, `vim`, `vi`.
 
 ### Discovering Artifacts
 

@@ -23,6 +23,10 @@ New commands
 - [ ] `art vault add` changes
   - Have this command assign a default name to the vault that matches it's folder name. e.g. `/path/to/my/personal-vault` would be named "personal-vault"
   - When adding a new vault, if a vault already exists with the same name, have the program prompt the user for a different name.
+  - Has a `--set-default` flag that sets the initialized vault as the new default
+- [ ] `art vault init <vault_name> <target_dir>` Initialize an entirely new vault in a target directory. Requires providing a name for the vault.
+  - If a user has no default vault configured, the program will notify users to either use `art vault add` to add a vault into the tool's configuration or to use `art vault init` to initialize a new vault.
+  - Has a `--set-default` flag that sets the initialized vault as the new default
 
 
 ## Feature Addition: Artifact Creation
@@ -46,8 +50,8 @@ Documentation referencing tool-specific yaml frontmatter has been included in th
 - Input field for the actual skill content.
 
 ## Feature Addition: Artifact Editing
-- [ ] New command: `art edit <artifact-name>`
-  - Opens the specific artifact's main `<ARTIFACT>.md` in your terminal's/shell's default text editor (nano/vim/nvim, whatever the env var is configured as)
+- [ ] New command: `art edit <artifact-type> <artifact-name>`
+  - Opens the specific artifact's main `<ARTIFACT>.md` (e.g. SKILL.md) in your terminal's/shell's default text editor (nano/vim/nvim, whatever the env var is configured as)
 
 ## Feature Addition: Marketplace Integration
 - [ ] Add a way to parse plugin / skill marketplaces for artifacts.

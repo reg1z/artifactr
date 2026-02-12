@@ -2,6 +2,7 @@
 
 import os
 import platform
+import shutil
 from pathlib import Path
 
 
@@ -30,6 +31,29 @@ def get_config_dir() -> Path:
         if xdg_config:
             return Path(xdg_config) / "artifactr"
         return Path.home() / ".config" / "artifactr"
+
+
+def get_editor() -> str | None:
+    """Return the user's preferred editor.
+
+    Resolution order:
+        1. $VISUAL environment variable
+        2. $EDITOR environment variable
+        3. First found from: nano, nvim, vim, vi
+
+    Returns:
+        The editor command string, or None if no editor is found.
+    """
+    for var in ("VISUAL", "EDITOR"):
+        value = os.environ.get(var)
+        if value:
+            return value
+
+    for editor in ("nano", "nvim", "vim", "vi"):
+        if shutil.which(editor):
+            return editor
+
+    return None
 
 
 def is_git_repo(path: Path) -> bool:

@@ -3,10 +3,21 @@
 This module provides business logic for managing vaults, separate from CLI parsing.
 """
 
+import re
 from pathlib import Path
 from typing import Any
 
 from .config import load_config, save_config
+
+
+def _next_auto_name(config: dict[str, Any]) -> str:
+    """Compute the next auto-name using the llm-vault-N pattern."""
+    max_n = 0
+    for vault_name in config["vault_names"].values():
+        m = re.match(r"^llm-vault-(\d+)$", vault_name)
+        if m:
+            max_n = max(max_n, int(m.group(1)))
+    return f"llm-vault-{max_n + 1}"
 
 
 def add_vaults(paths: list[str], name: str | None = None) -> dict[str, Any]:
@@ -15,12 +26,14 @@ def add_vaults(paths: list[str], name: str | None = None) -> dict[str, Any]:
     Args:
         paths: List of directory paths to add as vaults.
         name: Optional name for the vault (only used when adding a single path).
+              If None, vaults are auto-named using the llm-vault-N pattern.
 
     Returns:
         Result dict with keys:
             - added: List of paths that were successfully added
             - skipped: List of paths that were already in the catalog
             - errors: List of error messages for invalid paths
+            - names: Dict mapping added paths to their assigned names
     """
     config = load_config()
     existing_vaults = set(config["vaults"])
@@ -28,13 +41,17 @@ def add_vaults(paths: list[str], name: str | None = None) -> dict[str, Any]:
     added: list[str] = []
     skipped: list[str] = []
     errors: list[str] = []
+    assigned_names: dict[str, str] = {}
 
     # Validate name uniqueness if provided
     if name is not None:
-        existing_names = set(config["vault_names"].values())
-        if name in existing_names:
-            errors.append(f"Vault name already in use: {name}")
-            return {"added": added, "skipped": skipped, "errors": errors}
+        for vault_path, existing_name in config["vault_names"].items():
+            if existing_name == name:
+                errors.append(
+                    f"Vault name already in use: {name} (used by {vault_path}). "
+                    f"Use 'art vault name {name} <new-name>' to rename it."
+                )
+                return {"added": added, "skipped": skipped, "errors": errors, "names": assigned_names}
 
     for path_str in paths:
         path = Path(path_str).resolve()
@@ -58,9 +75,16 @@ def add_vaults(paths: list[str], name: str | None = None) -> dict[str, Any]:
         existing_vaults.add(path_str_resolved)
         added.append(path_str_resolved)
 
-    # Assign name to the first added vault if provided
-    if name is not None and added:
-        config["vault_names"][added[0]] = name
+        # Assign name
+        if name is not None:
+            # Explicit name for the first added vault only
+            config["vault_names"][path_str_resolved] = name
+            assigned_names[path_str_resolved] = name
+        else:
+            # Auto-name
+            auto_name = _next_auto_name(config)
+            config["vault_names"][path_str_resolved] = auto_name
+            assigned_names[path_str_resolved] = auto_name
 
     # Set first added vault as default if no default exists
     if added and config["default_vault"] is None:
@@ -68,7 +92,40 @@ def add_vaults(paths: list[str], name: str | None = None) -> dict[str, Any]:
 
     save_config(config)
 
-    return {"added": added, "skipped": skipped, "errors": errors}
+    return {"added": added, "skipped": skipped, "errors": errors, "names": assigned_names}
+
+
+def init_vault(target_dir: str, name: str | None = None) -> dict[str, Any]:
+    """Initialize a new vault directory with scaffolding and register it.
+
+    Creates the target directory with skills/, agents/, and commands/ subdirectories
+    if it doesn't already exist. Then registers the vault via add_vaults().
+
+    Args:
+        target_dir: Path to the vault directory to create/register.
+        name: Optional name for the vault (auto-named if None).
+
+    Returns:
+        Result dict with keys:
+            - created: Whether the directory was newly created
+            - added: List of paths that were added (from add_vaults)
+            - skipped: List of paths already registered (from add_vaults)
+            - errors: List of error messages
+            - names: Dict mapping paths to assigned names
+    """
+    path = Path(target_dir).resolve()
+    created = False
+
+    if not path.exists():
+        path.mkdir(parents=True, exist_ok=True)
+        (path / "skills").mkdir(exist_ok=True)
+        (path / "agents").mkdir(exist_ok=True)
+        (path / "commands").mkdir(exist_ok=True)
+        created = True
+
+    result = add_vaults([str(path)], name=name)
+    result["created"] = created
+    return result
 
 
 def remove_vaults(paths: list[str]) -> dict[str, Any]:
@@ -267,7 +324,7 @@ def get_vault_hierarchy(vault_path: str) -> dict | None:
 
 
 def select_default_tool(tool_name: str, supported_tools: list[str]) -> bool:
-    """Set a tool as the default.
+    """Set a tool as the default. Resolves aliases before validation.
 
     Args:
         tool_name: Name of the tool to set as default.
@@ -276,11 +333,14 @@ def select_default_tool(tool_name: str, supported_tools: list[str]) -> bool:
     Returns:
         True if successful, False if the tool is not supported.
     """
-    if tool_name not in supported_tools:
+    from .tools import resolve_tool_name
+
+    resolved = resolve_tool_name(tool_name)
+    if resolved not in supported_tools:
         return False
 
     config = load_config()
-    config["default_tool"] = tool_name
+    config["default_tool"] = resolved
     save_config(config)
     return True
 
