@@ -2,33 +2,33 @@
 
 Artifactr currently supports discovering, storing, and importing artifacts but has no creation flow. Users must manually create directories and write YAML frontmatter. The codebase follows a pattern of decoupled business logic (catalog.py, importer.py, scanner.py) with CLI handlers in cli.py and tool-specific behavior in tools/. The only external dependency is PyYAML.
 
-This change adds `art create skill <name>` with two modes: a Textual TUI for interactive creation, and a flag-based non-interactive mode. It introduces `textual` as a new dependency.
+This change adds `art create skill <name>` with flag-based creation requiring `--description`. The TUI for interactive creation is implemented on a separate `TUI` branch, decoupled from the CLI. `textual` is added as a dependency for future TUI integration.
 
 ## Goals / Non-Goals
 
 **Goals:**
 - Scaffold skills in vaults or project-local tool directories with correct structure
-- Provide a guided TUI experience that teaches users about available frontmatter fields
-- Support non-interactive creation via flags for scripting and automation
-- Maintain the tool-agnostic philosophy — no tool picker in the TUI, compatibility is informational only
+- Support flag-based creation with `--description` required
 - Keep the known-fields registry extensible as new tools are added
+- Maintain the tool-agnostic philosophy
 
 **Non-Goals:**
 - Creating agents or commands (future work — only skills for now)
 - Editing existing skills
-- TUI for other commands (future work — only `art create` for now)
-- Validating tool-specific field values (the TUI informs, it doesn't enforce)
+- TUI integration into CLI (deferred to `TUI` branch)
+- Validating tool-specific field values
 
 ## Decisions
 
 ### 1. Module structure
 
-**Decision:** Three new modules in `src/artifactr/`:
+**Decision:** Two new modules on main in `src/artifactr/`:
 - `creator.py` — Business logic for skill scaffolding (frontmatter generation, file writing, path resolution)
-- `tui.py` — Textual app for interactive creation
 - `known_fields.py` — Registry of known frontmatter fields with metadata (description, type, supported tools, input widget hint)
 
-**Rationale:** Follows the existing pattern of decoupled logic. `creator.py` handles the "what" (building the SKILL.md content and writing it), `tui.py` handles the interactive "how", and `known_fields.py` is a pure data module that both the TUI and future help/docs features can reference. The CLI handler in cli.py orchestrates: it decides which mode to use and calls either the TUI or creator directly.
+A third module, `tui.py`, is implemented on the `TUI` branch and not wired into the CLI on main.
+
+**Rationale:** Follows the existing pattern of decoupled logic. `creator.py` handles the "what" (building the SKILL.md content and writing it), `known_fields.py` is a pure data module that both the future TUI and help/docs features can reference. The CLI handler in cli.py orchestrates flag-based creation directly.
 
 **Alternative considered:** Putting known fields inside the TUI module. Rejected because the field registry is useful beyond the TUI (e.g., `--help` text, future validation, documentation generation).
 
@@ -40,28 +40,17 @@ This change adds `art create skill <name>` with two modes: a Textual TUI for int
 
 **Alternative considered:** `parse_known_args()` to allow any `--key value` flag. Rejected due to ambiguity (system flags vs frontmatter fields) and complexity.
 
-### 3. Mode detection
+### 3. Description required
 
-**Decision:** If any of `--name`, `--description`, `--content`, or `--field` are provided, use non-interactive mode. Otherwise, launch the Textual TUI. No explicit `--interactive` / `--no-tui` flag.
+**Decision:** `--description` / `-d` is required. Without it, the command prints a usage error. There is no auto-TUI launch — all creation is flag-based on main.
 
-**Rationale:** Presence of content flags is a natural, unambiguous signal. Users scripting will always provide flags; users exploring will type just `art create skill my-skill` and get the TUI. An explicit flag adds noise for no real gain.
+**Rationale:** The TUI was decoupled to a separate branch during implementation. Requiring description ensures skills always have meaningful metadata. The flag-based interface is sufficient for scripting and direct usage.
 
-### 4. Textual TUI structure
+**Previous decision (deferred):** Mode detection that auto-launched the TUI when no content flags were provided. This is implemented on the `TUI` branch.
 
-**Decision:** A single Textual `App` with a form layout:
-- Pre-populated `Name` input (from positional arg, editable)
-- `Description` text input
-- `[+ Add Field]` button that opens a modal picker
-- `Content` textarea for the markdown body
-- `[Cancel]` and `[Create]` action buttons
+### 4. Textual TUI structure (deferred to `TUI` branch)
 
-The field picker modal shows:
-1. Custom field name input (at top)
-2. Known fields list below (with descriptions and tool compatibility)
-
-Selecting a known field adds it to the form with the appropriate widget (text input, checkbox for booleans, select for enums like `context`). Each added field shows a tooltip icon with its description and which tools support it.
-
-**Rationale:** Minimal default view keeps the form clean. The picker makes fields discoverable without overwhelming. Custom-first ordering reinforces tool-agnostic philosophy.
+**Decision:** A single Textual `App` with a form layout. Implemented on the `TUI` branch, not wired into the CLI on main. See `TUI` branch for details.
 
 ### 5. Known fields registry structure
 

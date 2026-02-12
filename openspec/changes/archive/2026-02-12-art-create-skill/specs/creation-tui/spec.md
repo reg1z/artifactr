@@ -1,4 +1,6 @@
-## ADDED Requirements
+**NOTE:** TUI requirements are implemented on the `TUI` branch, not wired into CLI on main.
+
+## ADDED Requirements (deferred to `TUI` branch)
 
 ### Requirement: TUI application
 The interactive mode MUST launch a Textual application for guided skill creation.

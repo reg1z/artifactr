@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Skill scaffolding
 The `art create skill <name>` command MUST create a new skill with a `SKILL.md` file containing YAML frontmatter and optional markdown content.
@@ -68,16 +68,16 @@ The command MUST NOT silently overwrite an existing skill.
 - **WHEN** `art create skill my-skill` is run and `my-skill` already exists at the target location
 - **THEN** an error is printed: "Skill 'my-skill' already exists at <path>" and the command exits with code 1
 
-### Requirement: Mode detection
-The command MUST automatically select interactive (TUI) or non-interactive mode.
+### Requirement: Description required
+The command MUST require `--description` / `-d` to create a skill.
 
-#### Scenario: Non-interactive mode trigger
-- **WHEN** any of `--name`, `--description`, `--content`, or `--field` flags are provided
-- **THEN** the skill is created non-interactively using the provided flag values
+#### Scenario: Missing description
+- **WHEN** `art create skill my-skill` is run without `--description`
+- **THEN** an error is printed with usage hint and the command exits with code 1
 
-#### Scenario: Interactive mode trigger
-- **WHEN** none of the content flags (`--name`, `--description`, `--content`, `--field`) are provided
-- **THEN** the Textual TUI is launched for interactive creation
+#### Scenario: Description provided
+- **WHEN** `art create skill my-skill -d "A helpful skill"` is run
+- **THEN** the skill is created with the provided description
 
 #### Scenario: Positional name always required
 - **WHEN** `art create skill` is run without a name argument
@@ -111,7 +111,7 @@ The command MUST support the following flags with both short and long forms.
 - **THEN** the skill is created in the current project instead of a vault
 
 ### Requirement: Known fields registry
-A registry of known frontmatter fields MUST be maintained for use by the TUI and help text.
+A registry of known frontmatter fields MUST be maintained for use by help text and future TUI integration.
 
 #### Scenario: Field entry structure
 - **WHEN** a known field is registered

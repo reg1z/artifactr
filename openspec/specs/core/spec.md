@@ -72,6 +72,10 @@ Artifactr MUST only require Python 3.
   - `shutil` for file operations
   - `os` and `platform` for system detection
 
-#### Scenario: External dependency
+#### Scenario: External dependencies
 - **WHEN** YAML parsing is needed
-- **THEN** the `PyYAML` library MUST be used (the only external dependency)
+- **THEN** the `PyYAML` library MUST be used
+
+#### Scenario: TUI dependency
+- **WHEN** the interactive TUI mode is used
+- **THEN** the `textual` library (>=0.50) MUST be available as a project dependency

@@ -17,10 +17,10 @@
 ## 4. CLI Integration
 
 - [x] 4.1 Add `create` subcommand to argparse in `cli.py` with `skill` sub-subcommand and all flags: positional `name`, `-n/--name`, `-d/--description`, `-c/--content`, `-D/--field` (append), `-H/--here`, `--vault`, `--tools`
-- [x] 4.2 Implement `handle_create_skill()` in `cli.py` — mode detection (content flags → non-interactive, otherwise → TUI), vault/project resolution, delegation to creator or TUI
+- [x] 4.2 Implement `handle_create_skill()` in `cli.py` — require `--description`, flag-based creation, vault/project resolution, delegation to creator
 - [x] 4.3 Wire `handle_create_skill()` into the `main()` dispatch
 
-## 5. Textual TUI
+## 5. Textual TUI (deferred to `TUI` branch)
 
 - [x] 5.1 Implement base TUI app in `tui.py` with Textual `App` — form layout with Name input (pre-populated), Description input, Content textarea, Cancel/Create buttons
 - [x] 5.2 Implement "Add Field" button and modal picker — custom field name input at top, known fields list below with descriptions and tool compatibility info
