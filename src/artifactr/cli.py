@@ -22,6 +22,7 @@ from .catalog import (
     select_default,
     select_default_tool,
 )
+from .creator import create_skill, resolve_project_target, resolve_vault_target
 from .importer import copy_with_prompt, import_artifacts, import_artifacts_global
 from .scanner import discover_artifacts, extract_description, load_import_cache
 from .tools import get_supported_tools
@@ -134,6 +135,43 @@ def create_parser() -> argparse.ArgumentParser:
     store_parser.add_argument("target_dir", help="Path to directory containing artifacts")
     store_parser.add_argument(
         "--vault", help="Vault to store into (default: default vault)"
+    )
+
+    # create command with subcommands
+    create_parser = subparsers.add_parser("create", help="Create new artifacts")
+    create_subparsers = create_parser.add_subparsers(dest="create_command")
+
+    # create skill
+    create_skill_parser = create_subparsers.add_parser(
+        "skill", help="Create a new skill"
+    )
+    create_skill_parser.add_argument(
+        "skill_name", help="Skill identifier (directory name)"
+    )
+    create_skill_parser.add_argument(
+        "-n", "--name", dest="display_name",
+        help="Override the frontmatter display name",
+    )
+    create_skill_parser.add_argument(
+        "-d", "--description", help="Skill description",
+    )
+    create_skill_parser.add_argument(
+        "-c", "--content", help="Markdown body content",
+    )
+    create_skill_parser.add_argument(
+        "-D", "--field", action="append", default=[],
+        help="Additional frontmatter field as key=value (repeatable)",
+    )
+    create_skill_parser.add_argument(
+        "-H", "--here", action="store_true",
+        help="Create in current project instead of vault",
+    )
+    create_skill_parser.add_argument(
+        "--vault", help="Target vault (name or path)",
+    )
+    create_skill_parser.add_argument(
+        "--tools",
+        help="Comma-separated tool list (used with --here)",
     )
 
     return parser
@@ -579,6 +617,81 @@ def handle_store(args: argparse.Namespace) -> int:
     return 0
 
 
+def handle_create_skill(args: argparse.Namespace) -> int:
+    """Handle the create skill command.
+
+    Requires at least --description to create a skill. All creation is
+    flag-based (non-interactive).
+
+    Args:
+        args: Parsed command-line arguments.
+
+    Returns:
+        Exit code (0 for success, 1 for error).
+    """
+    skill_name = args.skill_name
+    display_name = getattr(args, "display_name", None) or skill_name
+    description = getattr(args, "description", None)
+    content = getattr(args, "content", None)
+    field_flags = getattr(args, "field", []) or []
+    here = getattr(args, "here", False)
+    vault = getattr(args, "vault", None)
+    tools_str = getattr(args, "tools", None)
+
+    if description is None:
+        print(
+            "Error: --description / -d is required.\n"
+            "Usage: art create skill <name> -d \"description\" [-c content] [-D key=value ...]",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Parse -D key=value flags into dict
+    extra_fields = {}
+    for field_str in field_flags:
+        if "=" not in field_str:
+            print(f"Error: Invalid field format '{field_str}'. Use key=value.", file=sys.stderr)
+            return 1
+        key, value = field_str.split("=", 1)
+        extra_fields[key] = value
+
+    # Resolve targets and create
+    if here:
+        tools_list = None
+        if tools_str:
+            tools_list = [t.strip() for t in tools_str.split(",")]
+
+        resolution = resolve_project_target(skill_name, tools=tools_list)
+        if not resolution["success"]:
+            print(f"Error: {resolution['error']}", file=sys.stderr)
+            return 1
+
+        targets = resolution["paths"]
+    else:
+        resolution = resolve_vault_target(skill_name, vault=vault)
+        if not resolution["success"]:
+            print(f"Error: {resolution['error']}", file=sys.stderr)
+            return 1
+
+        targets = [resolution["path"]]
+
+    # Create skill at each target
+    for target_path in targets:
+        result = create_skill(
+            name=display_name,
+            description=description,
+            content=content,
+            extra_fields=extra_fields if extra_fields else None,
+            target_path=target_path,
+        )
+        if not result["success"]:
+            print(f"Error: {result['error']}", file=sys.stderr)
+            return 1
+        print(f"Created skill: {result['path']}")
+
+    return 0
+
+
 def main() -> int:
     """Main entry point for the CLI.
 
@@ -628,6 +741,14 @@ def main() -> int:
 
     if args.command == "store":
         return handle_store(args)
+
+    if args.command == "create":
+        if args.create_command is None:
+            parser.parse_args(["create", "--help"])
+            return 0
+
+        if args.create_command == "skill":
+            return handle_create_skill(args)
 
     return 0
 
