@@ -28,12 +28,12 @@ New commands
 ## Feature Addition: Artifact Creation
 NOTE: Not all coding agents support the same artifact types. It just so happens that claude-code and opencode support similar structures.
 
-- [ ] New command: `art create <artifact-type>`
-  - TUI-based artifact creation
-  - uses the textual library for the interface https://textual.textualize.io/
+- [x] New command: `art create <artifact-type>`
+  - [ ] TUI-based artifact creation
+    - uses the textual library for the interface https://textual.textualize.io/
   - Support for
     - Initially we only want to support skills.
-    - [ ] Skills
+    - [x] Skills
     - [ ] Commands
     - [ ] Agents
 
@@ -44,6 +44,10 @@ Documentation referencing tool-specific yaml frontmatter has been included in th
   - description (required)
   - the user can add any arbitrary number of other frontmatter fields they wish. Suggestions exist for frontmatter to use based on the tool they have selected. These suggestions provide tooltips with some small info on the suggested frontmatter field, the tool it's supported in and what it's used for. The reason being that claude-code/opencode/other coding agents automatically detect different fields from one another.
 - Input field for the actual skill content.
+
+## Feature Addition: Artifact Editing
+- [ ] New command: `art edit <artifact-name>`
+  - Opens the specific artifact's main `<ARTIFACT>.md` in your terminal's/shell's default text editor (nano/vim/nvim, whatever the env var is configured as)
 
 ## Feature Addition: Marketplace Integration
 - [ ] Add a way to parse plugin / skill marketplaces for artifacts.
