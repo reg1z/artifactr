@@ -1,7 +1,13 @@
 # Artifactr
 
-A cross-platform CLI tool inspired by Obsidian for managing AI project artifacts. Maintain a personal library of prompts, skills, agents, and commands in centralized "vaults" and import them into any git repository for use with AI coding assistants.
+A cross-platform CLI tool for managing AI project artifacts. Maintain a personal library of skills, agents, and commands in centralized "vaults" and import them into any git repository for use with AI coding assistants.
 
+## *Why?* 🤔
+AI coding agents accumulate configs — skills, agents, commands — and they're all project-local. Starting a new repo often means rebuilding your environment from scratch.
+
+I develop mostly in cloud VMs via `ssh` and `tmux` for security purposes. I got tired of rebuilding my setup every time and desperately wanted a *terminal-centric* solution. Lo-and-behold: **Artifactr**
+
+It takes inspiration from local-first note-taking applications like Obsidian and Logseq. No external connections are made. Your vaults contain YOUR files.
 
 ## Features
 
@@ -33,6 +39,14 @@ Otherwise, you can install via `pip` (though it's recommended to use a non-syste
 ```sh
 pip install artifactr
 ```
+
+## Quickstart
+```sh
+art vault add ~/my-vault
+art store ~/repos/existing-project
+art import ~/repos/new-project
+```
+
 
 ## Usage
 
