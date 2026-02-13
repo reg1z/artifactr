@@ -368,7 +368,7 @@ def import_artifacts(
                 item_dest = dest_path / source.name
                 result = copy_with_prompt(source, item_dest, link=link, force=force)
                 imported[tool_name][artifact_type] = (
-                    imported[tool_name].get(artifact_type, 0) + result["copied"]
+                    imported[tool_name].get(artifact_type, 0) + (1 if result["copied"] > 0 else 0)
                 )
                 total_skipped += result["skipped"]
 
@@ -394,7 +394,8 @@ def import_artifacts(
                 for item in source_path.iterdir():
                     item_dest = dest_path / item.name
                     result = copy_with_prompt(item, item_dest, link=link, force=force)
-                    artifact_count += result["copied"]
+                    if result["copied"] > 0:
+                        artifact_count += 1
                     total_skipped += result["skipped"]
 
                     # Track successfully imported artifact names
@@ -598,7 +599,7 @@ def import_artifacts_global(
                 item_dest = dest_path / source.name
                 result = copy_with_prompt(source, item_dest, link=link, force=force)
                 imported[tool_name][artifact_type] = (
-                    imported[tool_name].get(artifact_type, 0) + result["copied"]
+                    imported[tool_name].get(artifact_type, 0) + (1 if result["copied"] > 0 else 0)
                 )
                 total_skipped += result["skipped"]
 
@@ -627,7 +628,8 @@ def import_artifacts_global(
                 for item in source_path.iterdir():
                     item_dest = dest_path / item.name
                     result = copy_with_prompt(item, item_dest, link=link, force=force)
-                    artifact_count += result["copied"]
+                    if result["copied"] > 0:
+                        artifact_count += 1
                     total_skipped += result["skipped"]
 
                     # Track successfully imported artifact names
