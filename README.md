@@ -14,7 +14,7 @@ I develop mostly in cloud VMs via `ssh` and `tmux` for security purposes. I got 
 
 It takes inspiration from local-first note-taking applications like Obsidian and Logseq. No external connections are made. Your vaults contain YOUR files.
 
-![demo1.gif](https://github.com/reg1z/media-assets/blob/c6b5197783e04fd206240850785acf1953d7fb8f/artifactr/demo1.gif?raw=true)
+![demo1.gif](https://raw.githubusercontent.com/reg1z/media-assets/refs/heads/main/artifactr/demo1.gif)
 
 ## Features
 
