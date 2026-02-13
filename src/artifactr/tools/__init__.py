@@ -155,6 +155,31 @@ def get_tool_config_dirs(
     return result
 
 
+def get_tool_global_dirs(
+    global_tools: dict[str, dict] | None = None,
+    vault_tools: dict[str, dict] | None = None,
+) -> dict[str, dict[str, str]]:
+    """Return a mapping of tool name to dict of artifact_type -> global path.
+
+    Only includes artifact types the tool has global paths for.
+    """
+    if global_tools or vault_tools:
+        registry = _build_tool_registry(extra_tools=global_tools, vault_tools=vault_tools)
+    else:
+        registry = _REGISTRY
+
+    result: dict[str, dict[str, str]] = {}
+    for name, adapter in registry.items():
+        paths: dict[str, str] = {}
+        for art_type in adapter.supported_types:
+            global_key = f"global_{art_type}"
+            if global_key in adapter._config:
+                paths[art_type] = adapter._expanded.get(global_key, "")
+        if paths:
+            result[name] = paths
+    return result
+
+
 def get_tool_source(
     tool_name: str,
     global_tools: dict[str, dict] | None = None,
@@ -184,6 +209,7 @@ __all__ = [
     "get_aliases_for_tool",
     "get_supported_tools",
     "get_tool_config_dirs",
+    "get_tool_global_dirs",
     "get_tool_source",
     "reload_registry",
     "resolve_tool_name",

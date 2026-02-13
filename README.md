@@ -50,7 +50,7 @@ pip install artifactr
 ```sh
 art vault add ~/my-vault
 art store ~/repos/existing-project
-art import ~/repos/new-project
+art proj import ~/repos/new-project
 ```
 
 ## Usage
@@ -117,29 +117,106 @@ art tool add my-tool --skills .my-tool/skills --vault=team-vault
 art tool rm cursor
 ```
 
-### Importing Artifacts
+### Listing Vault Contents
 
 ```sh
-# Import artifacts from default vault to default tool
-art import ~/repos/my-project
+# List all artifacts in the default vault
+art list
 
-# Import from a specific vault (by name or path)
-art import ~/repos/my-project --vault=favorites
+# List from a specific vault
+art list --vault=favorites
 
-# Import for specific tools (overrides default)
-art import ~/repos/my-project --tools=claude-code,opencode
-
-# Symlink artifacts instead of copying
-art import ~/repos/my-project --link
-
-# Import only specific artifacts by name
-art import ~/repos/my-project --artifacts=helping-hand,code-review
-
-# Combine with other flags
-art import ~/repos/my-project --vault=favorites --artifacts=helping-hand --link
+# Filter by type
+art list -S              # skills only
+art list -S -C           # skills and commands
+art list -S foo,bar      # only skills named foo and bar
 ```
 
-Imported artifacts are tracked in `.art-cache/imported` within the target directory, recording which vault and tool each artifact came from.
+### Removing Vault Artifacts
+
+```sh
+# Remove an artifact from the default vault
+art rm my-skill
+
+# Use type prefix for disambiguation
+art rm skills/my-skill
+
+# Remove without confirmation
+art rm my-skill -f
+```
+
+### Importing Artifacts (Project)
+
+```sh
+# Import into current directory (cwd default)
+art proj import
+
+# Import into a specific project
+art proj import ~/repos/my-project
+
+# Import from a specific vault
+art proj import --vault=favorites
+
+# Import for specific tools
+art proj import --tools=claude-code,opencode
+
+# Import only skills
+art proj import -S
+
+# Symlink instead of copying
+art proj import --link
+
+# Import only specific artifacts by name
+art proj import --artifacts=helping-hand,code-review
+
+# Don't add artifacts to .git/info/exclude
+art proj import --no-exclude
+```
+
+### Managing Project Artifacts
+
+```sh
+# List imported artifacts in current project
+art proj list
+
+# Remove specific imported artifacts
+art proj rm my-skill
+
+# Wipe all imported artifacts
+art proj wipe
+
+# Filter by type or tool
+art proj list -S --tools=claude-code
+art proj wipe -S -f
+```
+
+### Importing Artifacts (Global Config)
+
+```sh
+# Import into global config directories
+art conf import
+
+# Import from a specific vault
+art conf import --vault=favorites
+
+# Import only skills for claude-code
+art conf import --tools=claude-code -S
+```
+
+### Managing Global Config Artifacts
+
+```sh
+# List globally imported artifacts
+art conf list
+
+# Remove globally imported artifacts
+art conf rm my-skill
+
+# Wipe all globally imported artifacts
+art conf wipe -f
+```
+
+Imported artifacts are tracked in `.art-cache/imported` (project) and `~/.config/artifactr/.art-cache-global/imported` (global), recording which vault and tool each artifact came from.
 
 ### Creating Artifacts
 
@@ -191,11 +268,21 @@ The editor is resolved from `$VISUAL`, then `$EDITOR`, then the first available 
 
 ### Discovering Artifacts
 
-Scan any directory for existing artifacts across all supported tool config directories:
+Scan directories, vaults, or global configs for existing artifacts:
 
 ```sh
 # Discover artifacts in a project
 art spelunk ~/repos/my-project
+
+# Spelunk global config (default when no target)
+art spelunk
+
+# Explicit global flag
+art spelunk -g
+
+# Filter by tool or type
+art spelunk ~/repos/my-project --tools=claude-code
+art spelunk -S
 ```
 
 Example output:

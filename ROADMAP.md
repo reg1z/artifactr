@@ -8,12 +8,12 @@
 - [x] `vault.yaml` for portable vault metadata and vault-scoped tool definitions
 
 ## User-friendliness
-- [ ] Add the option for a user to disable artifact(s) from being added to `.git/info/exclude`.
+- [x] Add the option for a user to disable artifact(s) from being added to `.git/info/exclude` (`--no-exclude` on `proj import`).
 
 New commands
 - [ ] New command: Generate an example vault
   - Generates an example vault with some different types of artifacts.
-- [ ] New command: For editing a target repo's artifacts. Delete/wipe/etc.
+- [x] New command: For editing a target repo's artifacts. Delete/wipe/etc. (`proj rm`, `proj wipe`, `conf rm`, `conf wipe`).
 
 ## Feature Update: Adding Vaults
 - [ ] New Command: 
@@ -58,3 +58,8 @@ Documentation referencing tool-specific yaml frontmatter has been included in th
 - [ ] User can define their own personal list of marketplace URLs
 
 
+## Feature Addition: Custom Artifact types
+- [ ] Add a way to add support for custom artifact types.
+ - [ ] Can be defined globally (`~/.config/artifactr/`) or vault-scoped (`vault.yaml`).
+- Questions:
+  - Should these be tied to individual tools? The addition of additional artifact types might bloat the output of `art tool list`.

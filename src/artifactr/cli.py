@@ -34,16 +34,86 @@ from .config import (
     save_vault_metadata,
 )
 from .creator import create_artifact, create_skill, resolve_edit_target, resolve_project_target, resolve_vault_target
-from .importer import copy_with_prompt, import_artifacts, import_artifacts_global
-from .scanner import discover_artifacts, extract_description, load_import_cache
+from .importer import (
+    copy_with_prompt,
+    import_artifacts,
+    import_artifacts_global,
+    remove_from_global_import_cache,
+    remove_from_import_cache,
+)
+from .scanner import (
+    discover_artifacts,
+    discover_global_artifacts,
+    discover_vault_artifacts,
+    extract_description,
+    is_vault,
+    load_import_cache,
+)
 from .tools import (
     BUILTIN_TOOLS,
     get_aliases_for_tool,
     get_supported_tools,
     get_tool,
+    get_tool_config_dirs,
+    get_tool_global_dirs,
     get_tool_source,
     resolve_tool_name,
 )
+
+
+def add_type_filter_args(parser: argparse.ArgumentParser, allow_names: bool = True) -> None:
+    """Add type filter flags (-S/--skills, -C/--commands, -A/--agents) to a parser.
+
+    Args:
+        parser: The argparse parser or subparser to add flags to.
+        allow_names: If True, flags accept optional comma-separated names (nargs='?').
+                     If False, flags are boolean-only (store_true).
+    """
+    if allow_names:
+        parser.add_argument(
+            "-S", "--skills", nargs="?", const=True, default=None,
+            help="Filter to skills (optionally specify comma-separated names)",
+        )
+        parser.add_argument(
+            "-C", "--commands", nargs="?", const=True, default=None,
+            help="Filter to commands (optionally specify comma-separated names)",
+        )
+        parser.add_argument(
+            "-A", "--agents", nargs="?", const=True, default=None,
+            help="Filter to agents (optionally specify comma-separated names)",
+        )
+    else:
+        parser.add_argument(
+            "-S", "--skills", action="store_true",
+            help="Filter to skills",
+        )
+        parser.add_argument(
+            "-C", "--commands", action="store_true",
+            help="Filter to commands",
+        )
+        parser.add_argument(
+            "-A", "--agents", action="store_true",
+            help="Filter to agents",
+        )
+
+
+def resolve_type_filters(args: argparse.Namespace) -> dict[str, Any] | None:
+    """Interpret parsed type filter arguments into a structured result.
+
+    Returns:
+        None if no filters are specified (all types included).
+        Dict mapping type names to True (all of type) or list of names.
+    """
+    result: dict[str, Any] = {}
+
+    for type_name in ("skills", "commands", "agents"):
+        val = getattr(args, type_name, None)
+        if val is True:
+            result[type_name] = True
+        elif val is not None and val is not False and isinstance(val, str):
+            result[type_name] = [n.strip() for n in val.split(",")]
+
+    return result if result else None
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -57,44 +127,6 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
-
-    # import command
-    import_parser = subparsers.add_parser(
-        "import", help="Import artifacts into a git repo"
-    )
-    import_parser.add_argument(
-        "target", nargs="?", default=None, help="Path to target git repository"
-    )
-    import_parser.add_argument(
-        "--vault", help="Vault to import from (default: default vault)"
-    )
-    import_parser.add_argument(
-        "--tools",
-        help="Comma-separated list of tools to import",
-    )
-    import_parser.add_argument(
-        "--link",
-        "-l",
-        action="store_true",
-        help="Symlink vault contents instead of copying",
-    )
-    import_parser.add_argument(
-        "--artifacts",
-        help="Comma-separated list of artifact names to import",
-    )
-    import_parser.add_argument(
-        "--global",
-        "-g",
-        action="store_true",
-        dest="global_import",
-        help="Import into global config directories instead of a local repo",
-    )
-    import_parser.add_argument(
-        "--force",
-        "-f",
-        action="store_true",
-        help="Overwrite existing files without prompting",
-    )
 
     # vault command with subcommands
     vault_parser = subparsers.add_parser("vault", help="Manage vaults")
@@ -196,11 +228,189 @@ def create_parser() -> argparse.ArgumentParser:
         help="Filter to global config tools only",
     )
 
+    # list command (vault-side)
+    list_parser = subparsers.add_parser(
+        "list", help="List artifacts in a vault"
+    )
+    list_parser.add_argument(
+        "--vault", help="Vault to list from (default: default vault)"
+    )
+    add_type_filter_args(list_parser)
+
+    # rm command (vault-side)
+    rm_parser = subparsers.add_parser(
+        "rm", help="Remove artifacts from a vault"
+    )
+    rm_parser.add_argument(
+        "names", nargs="+", help="Artifact names to remove (supports type/name prefix)"
+    )
+    rm_parser.add_argument(
+        "--vault", help="Vault to remove from (default: default vault)"
+    )
+    rm_parser.add_argument(
+        "-f", "--force", action="store_true",
+        help="Skip confirmation prompt",
+    )
+
     # spelunk command
     spelunk_parser = subparsers.add_parser(
-        "spelunk", help="Discover artifacts in a target directory"
+        "spelunk", help="Discover artifacts in a directory, vault, or global config"
     )
-    spelunk_parser.add_argument("target", help="Path to directory to probe")
+    spelunk_parser.add_argument("target", nargs="?", default=None, help="Path to directory to probe")
+    spelunk_parser.add_argument(
+        "-g", "--global", action="store_true", dest="global_spelunk",
+        help="Explicitly scan global config directories",
+    )
+    spelunk_parser.add_argument(
+        "--tools", help="Comma-separated list of tools to filter to",
+    )
+    add_type_filter_args(spelunk_parser)
+
+    # project namespace (art project / art proj)
+    project_parser = subparsers.add_parser(
+        "project", aliases=["proj"], help="Project-side artifact operations"
+    )
+    proj_subparsers = project_parser.add_subparsers(dest="proj_command")
+
+    # proj import
+    proj_import = proj_subparsers.add_parser(
+        "import", help="Import artifacts from vault into a project"
+    )
+    proj_import.add_argument(
+        "target", nargs="?", default=None, help="Path to target git repository (default: cwd)"
+    )
+    proj_import.add_argument(
+        "--vault", help="Vault to import from (default: default vault)"
+    )
+    proj_import.add_argument(
+        "--tools", help="Comma-separated list of tools to import",
+    )
+    proj_import.add_argument(
+        "--artifacts", help="Comma-separated list of artifact names to import",
+    )
+    proj_import.add_argument(
+        "-l", "--link", action="store_true",
+        help="Symlink vault contents instead of copying",
+    )
+    proj_import.add_argument(
+        "-f", "--force", action="store_true",
+        help="Overwrite existing files without prompting",
+    )
+    proj_import.add_argument(
+        "--no-exclude", action="store_true",
+        help="Don't add artifact paths to .git/info/exclude (.art-cache still excluded)",
+    )
+    add_type_filter_args(proj_import)
+
+    # proj rm
+    proj_rm = proj_subparsers.add_parser(
+        "rm", help="Remove imported artifacts from a project"
+    )
+    proj_rm.add_argument("names", nargs="+", help="Artifact names to remove")
+    proj_rm.add_argument(
+        "--target", default=None, help="Project path (default: cwd)",
+    )
+    proj_rm.add_argument(
+        "--tools", help="Comma-separated tool filter",
+    )
+    proj_rm.add_argument(
+        "-f", "--force", action="store_true",
+        help="Skip confirmation prompt",
+    )
+    add_type_filter_args(proj_rm, allow_names=False)
+
+    # proj wipe
+    proj_wipe = proj_subparsers.add_parser(
+        "wipe", help="Clear all imported artifacts from a project"
+    )
+    proj_wipe.add_argument(
+        "--target", default=None, help="Project path (default: cwd)",
+    )
+    proj_wipe.add_argument(
+        "--tools", help="Comma-separated tool filter",
+    )
+    proj_wipe.add_argument(
+        "-f", "--force", action="store_true",
+        help="Skip confirmation prompt",
+    )
+    add_type_filter_args(proj_wipe)
+
+    # proj list
+    proj_list = proj_subparsers.add_parser(
+        "list", help="Show imported artifacts in a project"
+    )
+    proj_list.add_argument(
+        "--target", default=None, help="Project path (default: cwd)",
+    )
+    proj_list.add_argument(
+        "--tools", help="Comma-separated tool filter",
+    )
+    add_type_filter_args(proj_list)
+
+    # config namespace (art config / art conf)
+    config_parser = subparsers.add_parser(
+        "config", aliases=["conf"], help="Global config artifact operations"
+    )
+    conf_subparsers = config_parser.add_subparsers(dest="conf_command")
+
+    # conf import
+    conf_import = conf_subparsers.add_parser(
+        "import", help="Import artifacts into global config directories"
+    )
+    conf_import.add_argument(
+        "--vault", help="Vault to import from (default: default vault)"
+    )
+    conf_import.add_argument(
+        "--tools", help="Comma-separated list of tools to import",
+    )
+    conf_import.add_argument(
+        "--artifacts", help="Comma-separated list of artifact names to import",
+    )
+    conf_import.add_argument(
+        "-l", "--link", action="store_true",
+        help="Symlink vault contents instead of copying",
+    )
+    conf_import.add_argument(
+        "-f", "--force", action="store_true",
+        help="Overwrite existing files without prompting",
+    )
+    add_type_filter_args(conf_import)
+
+    # conf rm
+    conf_rm = conf_subparsers.add_parser(
+        "rm", help="Remove globally imported artifacts"
+    )
+    conf_rm.add_argument("names", nargs="+", help="Artifact names to remove")
+    conf_rm.add_argument(
+        "--tools", help="Comma-separated tool filter",
+    )
+    conf_rm.add_argument(
+        "-f", "--force", action="store_true",
+        help="Skip confirmation prompt",
+    )
+    add_type_filter_args(conf_rm, allow_names=False)
+
+    # conf wipe
+    conf_wipe = conf_subparsers.add_parser(
+        "wipe", help="Clear all globally imported artifacts"
+    )
+    conf_wipe.add_argument(
+        "--tools", help="Comma-separated tool filter",
+    )
+    conf_wipe.add_argument(
+        "-f", "--force", action="store_true",
+        help="Skip confirmation prompt",
+    )
+    add_type_filter_args(conf_wipe)
+
+    # conf list
+    conf_list = conf_subparsers.add_parser(
+        "list", help="Show globally imported artifacts"
+    )
+    conf_list.add_argument(
+        "--tools", help="Comma-separated tool filter",
+    )
+    add_type_filter_args(conf_list)
 
     # store command
     store_parser = subparsers.add_parser(
@@ -210,6 +420,7 @@ def create_parser() -> argparse.ArgumentParser:
     store_parser.add_argument(
         "--vault", help="Vault to store into (default: default vault)"
     )
+    add_type_filter_args(store_parser)
 
     # edit command
     edit_parser = subparsers.add_parser("edit", help="Edit an artifact in your editor")
@@ -330,22 +541,10 @@ def create_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def handle_import(args: argparse.Namespace) -> int:
-    """Handle the import command."""
+def _load_vault_tools_for_import(args: argparse.Namespace) -> tuple[dict, dict]:
+    """Load global and vault tools for import operations."""
     from .tools import reload_registry
 
-    global_import = getattr(args, "global_import", False)
-    force = getattr(args, "force", False)
-
-    if not global_import and args.target is None:
-        print(
-            "Error: A target repository is required unless --global is used.\n"
-            "Usage: art import <target> or art import --global",
-            file=sys.stderr,
-        )
-        return 1
-
-    # Load vault tool definitions for three-tier resolution
     global_tools = load_global_tools()
     vault_tools: dict[str, dict] = {}
     vault_identifier = getattr(args, "vault", None)
@@ -360,8 +559,115 @@ def handle_import(args: argparse.Namespace) -> int:
             meta = load_vault_metadata(default_vault)
             vault_tools = meta.get("tools", {})
 
-    # Reload registry with all tiers so import functions see custom tools
     reload_registry(global_tools=global_tools, vault_tools=vault_tools)
+    return global_tools, vault_tools
+
+
+def handle_list(args: argparse.Namespace) -> int:
+    """Handle the art list command (vault-side listing)."""
+    vault_identifier = getattr(args, "vault", None)
+    if vault_identifier:
+        vault_path_str = get_vault_by_name_or_path(vault_identifier)
+        if vault_path_str is None:
+            print(f"Error: Vault not in catalog: {vault_identifier}", file=sys.stderr)
+            return 1
+    else:
+        vault_path_str = get_default_vault()
+        if vault_path_str is None:
+            print("Error: No default vault set. Use 'art vault add' or 'art vault init' to set up a vault.", file=sys.stderr)
+            return 1
+
+    vault_path = Path(vault_path_str)
+    artifacts = discover_vault_artifacts(vault_path)
+
+    type_filters = resolve_type_filters(args)
+    if type_filters:
+        artifacts = _apply_type_filters(artifacts, type_filters)
+
+    if not artifacts:
+        print("No artifacts found in vault.")
+        return 0
+
+    rows = []
+    for art in artifacts:
+        description = extract_description(art)
+        rows.append((art["name"], art["type"], description))
+
+    headers = ("NAME", "TYPE", "DESCRIPTION")
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for i, val in enumerate(row):
+            widths[i] = max(widths[i], len(val))
+
+    fmt = "  ".join(f"{{:<{w}}}" for w in widths)
+    print(fmt.format(*headers))
+    for row in rows:
+        print(fmt.format(*row))
+
+    return 0
+
+
+def handle_rm(args: argparse.Namespace) -> int:
+    """Handle the art rm command (vault-side removal)."""
+    from .importer import resolve_artifact_names
+
+    vault_identifier = getattr(args, "vault", None)
+    if vault_identifier:
+        vault_path_str = get_vault_by_name_or_path(vault_identifier)
+        if vault_path_str is None:
+            print(f"Error: Vault not in catalog: {vault_identifier}", file=sys.stderr)
+            return 1
+    else:
+        vault_path_str = get_default_vault()
+        if vault_path_str is None:
+            print("Error: No default vault set. Use 'art vault add' or 'art vault init' to set up a vault.", file=sys.stderr)
+            return 1
+
+    vault_path = Path(vault_path_str)
+    force = getattr(args, "force", False)
+
+    resolved = resolve_artifact_names(vault_path, args.names)
+    if not resolved:
+        print("No matching artifacts found.", file=sys.stderr)
+        return 1
+
+    if not force:
+        print("The following artifacts will be removed:")
+        for art in resolved:
+            print(f"  {art['type']}/{art['name']}")
+        try:
+            response = input("Continue? [y/N]: ")
+            if response.lower() not in ("y", "yes"):
+                print("Aborted.")
+                return 0
+        except EOFError:
+            print("Aborted.")
+            return 0
+
+    import shutil
+    removed = 0
+    for art in resolved:
+        source = art["source"]
+        if source.is_dir():
+            shutil.rmtree(source)
+        elif source.is_file():
+            source.unlink()
+        print(f"Removed: {art['type']}/{art['name']}")
+        removed += 1
+
+    print(f"\n{removed} artifact(s) removed.")
+    return 0
+
+
+def handle_proj_import(args: argparse.Namespace) -> int:
+    """Handle the proj import command."""
+    from .tools import reload_registry
+
+    target = args.target or str(Path.cwd())
+    force = getattr(args, "force", False)
+    no_exclude = getattr(args, "no_exclude", False)
+
+    _load_vault_tools_for_import(args)
 
     tools_list: list[str]
     if args.tools:
@@ -373,26 +679,20 @@ def handle_import(args: argparse.Namespace) -> int:
     if getattr(args, "artifacts", None):
         artifacts_list = [a.strip() for a in args.artifacts.split(",")]
 
+    type_filters = resolve_type_filters(args)
+
     try:
-        if global_import:
-            result = import_artifacts_global(
-                vault=args.vault,
-                tools=tools_list,
-                link=args.link,
-                artifacts=artifacts_list,
-                force=force,
-            )
-        else:
-            result = import_artifacts(
-                target=args.target,
-                vault=args.vault,
-                tools=tools_list,
-                link=args.link,
-                artifacts=artifacts_list,
-                force=force,
-            )
+        result = import_artifacts(
+            target=target,
+            vault=getattr(args, "vault", None),
+            tools=tools_list,
+            link=getattr(args, "link", False),
+            artifacts=artifacts_list,
+            force=force,
+            no_exclude=no_exclude,
+            type_filters=type_filters,
+        )
     finally:
-        # Reset registry back to defaults
         reload_registry()
 
     if not result["success"]:
@@ -402,6 +702,742 @@ def handle_import(args: argparse.Namespace) -> int:
 
     print_import_summary(result)
     return 0
+
+
+def handle_proj_rm(args: argparse.Namespace) -> int:
+    """Handle the proj rm command."""
+    target_path = Path(args.target).resolve() if getattr(args, "target", None) else Path.cwd().resolve()
+    force = getattr(args, "force", False)
+
+    tools_filter = None
+    if getattr(args, "tools", None):
+        tools_filter = [t.strip() for t in args.tools.split(",")]
+
+    type_filters = resolve_type_filters(args)
+
+    # Load cache to find artifact locations
+    cache = _load_cache_entries(target_path)
+    if not cache:
+        print("No imported artifacts found.", file=sys.stderr)
+        return 1
+
+    # Find artifacts matching the given names
+    global_tools = load_global_tools()
+    vault_tools_dict, _ = load_active_vault_tools()
+    tool_config_dirs = get_tool_config_dirs(global_tools=global_tools, vault_tools=vault_tools_dict)
+
+    to_remove: list[dict] = []
+    for name in args.names:
+        found = _find_project_artifacts(target_path, name, tool_config_dirs, cache, tools_filter, type_filters)
+        to_remove.extend(found)
+
+    if not to_remove:
+        print("No matching artifacts found.", file=sys.stderr)
+        return 1
+
+    if not force:
+        print("The following artifacts will be removed:")
+        for art in to_remove:
+            print(f"  {art['name']} ({art['type']}) - {art['path']}")
+        try:
+            response = input("Continue? [y/N]: ")
+            if response.lower() not in ("y", "yes"):
+                print("Aborted.")
+                return 0
+        except EOFError:
+            print("Aborted.")
+            return 0
+
+    import shutil
+    removed_names = []
+    for art in to_remove:
+        path = art["path"]
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.is_file():
+            path.unlink()
+        removed_names.append(art["name"])
+        print(f"Removed: {art['name']} ({art['type']})")
+
+    if removed_names:
+        remove_from_import_cache(target_path, removed_names)
+
+    print(f"\n{len(removed_names)} artifact(s) removed.")
+    return 0
+
+
+def handle_proj_wipe(args: argparse.Namespace) -> int:
+    """Handle the proj wipe command."""
+    target_path = Path(args.target).resolve() if getattr(args, "target", None) else Path.cwd().resolve()
+    force = getattr(args, "force", False)
+
+    tools_filter = None
+    if getattr(args, "tools", None):
+        tools_filter = [t.strip() for t in args.tools.split(",")]
+
+    type_filters = resolve_type_filters(args)
+
+    cache = _load_cache_entries(target_path)
+    if not cache:
+        print("No imported artifacts found.")
+        return 0
+
+    global_tools = load_global_tools()
+    vault_tools_dict, _ = load_active_vault_tools()
+    tool_config_dirs = get_tool_config_dirs(global_tools=global_tools, vault_tools=vault_tools_dict)
+
+    to_remove = _find_all_project_artifacts(target_path, tool_config_dirs, cache, tools_filter, type_filters)
+
+    if not to_remove:
+        print("No matching artifacts found.")
+        return 0
+
+    if not force:
+        print("The following artifacts will be removed:")
+        for art in to_remove:
+            print(f"  {art['name']} ({art['type']}) - {art['path']}")
+        try:
+            response = input("Continue? [y/N]: ")
+            if response.lower() not in ("y", "yes"):
+                print("Aborted.")
+                return 0
+        except EOFError:
+            print("Aborted.")
+            return 0
+
+    import shutil
+    removed_names = []
+    for art in to_remove:
+        path = art["path"]
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.is_file():
+            path.unlink()
+        removed_names.append(art["name"])
+        print(f"Removed: {art['name']} ({art['type']})")
+
+    if removed_names:
+        remove_from_import_cache(target_path, removed_names)
+
+    print(f"\n{len(removed_names)} artifact(s) removed.")
+    return 0
+
+
+def handle_proj_list(args: argparse.Namespace) -> int:
+    """Handle the proj list command."""
+    target_path = Path(args.target).resolve() if getattr(args, "target", None) else Path.cwd().resolve()
+
+    tools_filter = None
+    if getattr(args, "tools", None):
+        tools_filter = [t.strip() for t in args.tools.split(",")]
+
+    type_filters = resolve_type_filters(args)
+
+    cache = _load_cache_entries(target_path)
+    if not cache:
+        print("No imported artifacts found.")
+        return 0
+
+    rows = []
+    for entry in cache:
+        # Apply tool filter
+        if tools_filter and entry["tool"] not in tools_filter:
+            continue
+        # Apply type filter
+        if type_filters and entry["type_plural"] not in type_filters:
+            continue
+        rows.append((entry["name"], entry["type"], entry["tool"], entry["vault"]))
+
+    if not rows:
+        print("No matching imported artifacts found.")
+        return 0
+
+    headers = ("NAME", "TYPE", "TOOL", "VAULT")
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for i, val in enumerate(row):
+            widths[i] = max(widths[i], len(val))
+
+    fmt = "  ".join(f"{{:<{w}}}" for w in widths)
+    print(fmt.format(*headers))
+    for row in rows:
+        print(fmt.format(*row))
+
+    return 0
+
+
+def handle_conf_import(args: argparse.Namespace) -> int:
+    """Handle the conf import command."""
+    from .tools import reload_registry
+
+    _load_vault_tools_for_import(args)
+
+    tools_list: list[str]
+    if args.tools:
+        tools_list = [t.strip() for t in args.tools.split(",")]
+    else:
+        tools_list = [get_default_tool()]
+
+    artifacts_list = None
+    if getattr(args, "artifacts", None):
+        artifacts_list = [a.strip() for a in args.artifacts.split(",")]
+
+    type_filters = resolve_type_filters(args)
+
+    try:
+        result = import_artifacts_global(
+            vault=getattr(args, "vault", None),
+            tools=tools_list,
+            link=getattr(args, "link", False),
+            artifacts=artifacts_list,
+            force=getattr(args, "force", False),
+            type_filters=type_filters,
+        )
+    finally:
+        reload_registry()
+
+    if not result["success"]:
+        for error in result["errors"]:
+            print(error, file=sys.stderr)
+        return 1
+
+    print_import_summary(result)
+    return 0
+
+
+def handle_conf_rm(args: argparse.Namespace) -> int:
+    """Handle the conf rm command."""
+    force = getattr(args, "force", False)
+
+    tools_filter = None
+    if getattr(args, "tools", None):
+        tools_filter = [t.strip() for t in args.tools.split(",")]
+
+    type_filters = resolve_type_filters(args)
+
+    cache = _load_global_cache_entries()
+    if not cache:
+        print("No globally imported artifacts found.", file=sys.stderr)
+        return 1
+
+    global_tools = load_global_tools()
+    vault_tools_dict, _ = load_active_vault_tools()
+    tool_global_dirs = get_tool_global_dirs(global_tools=global_tools, vault_tools=vault_tools_dict)
+
+    to_remove: list[dict] = []
+    for name in args.names:
+        found = _find_global_artifacts(name, tool_global_dirs, cache, tools_filter, type_filters)
+        to_remove.extend(found)
+
+    if not to_remove:
+        print("No matching artifacts found.", file=sys.stderr)
+        return 1
+
+    if not force:
+        print("The following artifacts will be removed:")
+        for art in to_remove:
+            print(f"  {art['name']} ({art['type']}) - {art['path']}")
+        try:
+            response = input("Continue? [y/N]: ")
+            if response.lower() not in ("y", "yes"):
+                print("Aborted.")
+                return 0
+        except EOFError:
+            print("Aborted.")
+            return 0
+
+    import shutil
+    removed_names = []
+    for art in to_remove:
+        path = art["path"]
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.is_file():
+            path.unlink()
+        removed_names.append(art["name"])
+        print(f"Removed: {art['name']} ({art['type']})")
+
+    if removed_names:
+        remove_from_global_import_cache(removed_names)
+
+    print(f"\n{len(removed_names)} artifact(s) removed.")
+    return 0
+
+
+def handle_conf_wipe(args: argparse.Namespace) -> int:
+    """Handle the conf wipe command."""
+    force = getattr(args, "force", False)
+
+    tools_filter = None
+    if getattr(args, "tools", None):
+        tools_filter = [t.strip() for t in args.tools.split(",")]
+
+    type_filters = resolve_type_filters(args)
+
+    cache = _load_global_cache_entries()
+    if not cache:
+        print("No globally imported artifacts found.")
+        return 0
+
+    global_tools = load_global_tools()
+    vault_tools_dict, _ = load_active_vault_tools()
+    tool_global_dirs = get_tool_global_dirs(global_tools=global_tools, vault_tools=vault_tools_dict)
+
+    to_remove = _find_all_global_artifacts(tool_global_dirs, cache, tools_filter, type_filters)
+
+    if not to_remove:
+        print("No matching artifacts found.")
+        return 0
+
+    if not force:
+        print("The following artifacts will be removed:")
+        for art in to_remove:
+            print(f"  {art['name']} ({art['type']}) - {art['path']}")
+        try:
+            response = input("Continue? [y/N]: ")
+            if response.lower() not in ("y", "yes"):
+                print("Aborted.")
+                return 0
+        except EOFError:
+            print("Aborted.")
+            return 0
+
+    import shutil
+    removed_names = []
+    for art in to_remove:
+        path = art["path"]
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.is_file():
+            path.unlink()
+        removed_names.append(art["name"])
+        print(f"Removed: {art['name']} ({art['type']})")
+
+    if removed_names:
+        remove_from_global_import_cache(removed_names)
+
+    print(f"\n{len(removed_names)} artifact(s) removed.")
+    return 0
+
+
+def handle_conf_list(args: argparse.Namespace) -> int:
+    """Handle the conf list command."""
+    tools_filter = None
+    if getattr(args, "tools", None):
+        tools_filter = [t.strip() for t in args.tools.split(",")]
+
+    type_filters = resolve_type_filters(args)
+
+    cache = _load_global_cache_entries()
+    if not cache:
+        print("No globally imported artifacts found.")
+        return 0
+
+    rows = []
+    for entry in cache:
+        if tools_filter and entry["tool"] not in tools_filter:
+            continue
+        if type_filters and entry["type_plural"] not in type_filters:
+            continue
+        rows.append((entry["name"], entry["type"], entry["tool"], entry["vault"]))
+
+    if not rows:
+        print("No matching imported artifacts found.")
+        return 0
+
+    headers = ("NAME", "TYPE", "TOOL", "VAULT")
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for i, val in enumerate(row):
+            widths[i] = max(widths[i], len(val))
+
+    fmt = "  ".join(f"{{:<{w}}}" for w in widths)
+    print(fmt.format(*headers))
+    for row in rows:
+        print(fmt.format(*row))
+
+    return 0
+
+
+def _apply_type_filters(artifacts: list[dict], type_filters: dict[str, Any]) -> list[dict]:
+    """Filter a list of artifacts based on type filters."""
+    result = []
+    for art in artifacts:
+        type_plural = art["type_plural"]
+        if type_plural not in type_filters:
+            continue
+        filter_val = type_filters[type_plural]
+        if filter_val is True:
+            result.append(art)
+        elif isinstance(filter_val, list):
+            if art["name"] in filter_val:
+                result.append(art)
+    return result
+
+
+def _load_cache_entries(target: Path) -> list[dict]:
+    """Load import cache entries as structured dicts, enriched with type info."""
+    cache_file = target / ".art-cache" / "imported"
+    if not cache_file.is_file():
+        return []
+
+    entries = []
+    try:
+        content = cache_file.read_text(encoding="utf-8")
+    except OSError:
+        return []
+
+    # Build a lookup to determine artifact types from filesystem
+    global_tools = load_global_tools()
+    vault_tools_dict, _ = load_active_vault_tools()
+    tool_config_dirs = get_tool_config_dirs(global_tools=global_tools, vault_tools=vault_tools_dict)
+
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split(".")
+        if len(parts) < 3:
+            continue
+        vault_name = parts[0]
+        tool_name = parts[1]
+        artifact_name = parts[-1]
+
+        # Determine type by probing filesystem
+        art_type, art_type_plural = _resolve_artifact_type(
+            target, artifact_name, tool_name, tool_config_dirs
+        )
+
+        entries.append({
+            "name": artifact_name,
+            "tool": tool_name,
+            "vault": vault_name,
+            "type": art_type,
+            "type_plural": art_type_plural,
+            "raw": line,
+        })
+
+    return entries
+
+
+def _load_global_cache_entries() -> list[dict]:
+    """Load global import cache entries as structured dicts, enriched with type info."""
+    cache_file = Path.home() / ".config" / "artifactr" / ".art-cache-global" / "imported"
+    if not cache_file.is_file():
+        return []
+
+    entries = []
+    try:
+        content = cache_file.read_text(encoding="utf-8")
+    except OSError:
+        return []
+
+    global_tools = load_global_tools()
+    vault_tools_dict, _ = load_active_vault_tools()
+    tool_global_dirs = get_tool_global_dirs(global_tools=global_tools, vault_tools=vault_tools_dict)
+
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split(".")
+        if len(parts) < 3:
+            continue
+        vault_name = parts[0]
+        tool_name = parts[1]
+        artifact_name = parts[-1]
+
+        art_type, art_type_plural = _resolve_global_artifact_type(
+            artifact_name, tool_name, tool_global_dirs
+        )
+
+        entries.append({
+            "name": artifact_name,
+            "tool": tool_name,
+            "vault": vault_name,
+            "type": art_type,
+            "type_plural": art_type_plural,
+            "raw": line,
+        })
+
+    return entries
+
+
+def _resolve_artifact_type(
+    target: Path,
+    name: str,
+    tool_name: str,
+    tool_config_dirs: dict[str, dict[str, str]],
+) -> tuple[str, str]:
+    """Resolve the type of an artifact by probing the filesystem."""
+    if tool_name in tool_config_dirs:
+        type_paths = tool_config_dirs[tool_name]
+        for artifact_type, repo_path in type_paths.items():
+            base = target / repo_path
+            if artifact_type == "skills":
+                if (base / name).is_dir() and (base / name / "SKILL.md").is_file():
+                    return ("skill", "skills")
+            elif artifact_type == "commands":
+                if (base / f"{name}.md").is_file():
+                    return ("command", "commands")
+            elif artifact_type == "agents":
+                if (base / f"{name}.md").is_file():
+                    return ("agent", "agents")
+    return ("unknown", "unknown")
+
+
+def _resolve_global_artifact_type(
+    name: str,
+    tool_name: str,
+    tool_global_dirs: dict[str, dict[str, str]],
+) -> tuple[str, str]:
+    """Resolve the type of a globally imported artifact by probing the filesystem."""
+    if tool_name in tool_global_dirs:
+        type_paths = tool_global_dirs[tool_name]
+        for artifact_type, global_path in type_paths.items():
+            base = Path(global_path)
+            if artifact_type == "skills":
+                if (base / name).is_dir() and (base / name / "SKILL.md").is_file():
+                    return ("skill", "skills")
+            elif artifact_type == "commands":
+                if (base / f"{name}.md").is_file():
+                    return ("command", "commands")
+            elif artifact_type == "agents":
+                if (base / f"{name}.md").is_file():
+                    return ("agent", "agents")
+    return ("unknown", "unknown")
+
+
+def _find_project_artifacts(
+    target: Path,
+    name: str,
+    tool_config_dirs: dict[str, dict[str, str]],
+    cache: list[dict],
+    tools_filter: list[str] | None,
+    type_filters: dict[str, Any] | None,
+) -> list[dict]:
+    """Find project artifacts matching a name across tool config dirs."""
+    # Check if name has a type prefix
+    type_prefix = None
+    search_name = name
+    if "/" in name:
+        type_prefix, search_name = name.split("/", 1)
+
+    matches = []
+    for tool_name, type_paths in tool_config_dirs.items():
+        if tools_filter and tool_name not in tools_filter:
+            continue
+
+        for artifact_type, repo_path in type_paths.items():
+            if type_prefix and artifact_type != type_prefix:
+                continue
+            if type_filters and artifact_type not in type_filters:
+                continue
+
+            base = target / repo_path
+            if artifact_type == "skills":
+                candidate = base / search_name
+                if candidate.is_dir() and (candidate / "SKILL.md").is_file():
+                    matches.append({
+                        "name": search_name,
+                        "type": "skill",
+                        "type_plural": "skills",
+                        "path": candidate,
+                        "tool": tool_name,
+                    })
+            else:
+                candidate = base / f"{search_name}.md"
+                if candidate.is_file():
+                    singular = "command" if artifact_type == "commands" else "agent"
+                    matches.append({
+                        "name": search_name,
+                        "type": singular,
+                        "type_plural": artifact_type,
+                        "path": candidate,
+                        "tool": tool_name,
+                    })
+
+    if len(matches) > 1 and type_prefix is None and type_filters is None:
+        # Ambiguous — prompt user
+        print(f'Ambiguous artifact name: "{name}"')
+        print("Found in multiple locations:")
+        for i, m in enumerate(matches, 1):
+            print(f"  {i}. {m['type_plural']}/{m['name']} ({m['tool']})")
+        try:
+            choice = input(f"Select one [1-{len(matches)}]: ")
+            idx = int(choice) - 1
+            if 0 <= idx < len(matches):
+                return [matches[idx]]
+        except (EOFError, ValueError):
+            pass
+        return []
+
+    return matches
+
+
+def _find_all_project_artifacts(
+    target: Path,
+    tool_config_dirs: dict[str, dict[str, str]],
+    cache: list[dict],
+    tools_filter: list[str] | None,
+    type_filters: dict[str, Any] | None,
+) -> list[dict]:
+    """Find all project artifacts that match filters, based on cache."""
+    seen = set()
+    results = []
+
+    for entry in cache:
+        if tools_filter and entry["tool"] not in tools_filter:
+            continue
+
+        name = entry["name"]
+        tool_name = entry["tool"]
+
+        if tool_name not in tool_config_dirs:
+            continue
+
+        type_paths = tool_config_dirs[tool_name]
+        for artifact_type, repo_path in type_paths.items():
+            if type_filters and artifact_type not in type_filters:
+                continue
+
+            base = target / repo_path
+            if artifact_type == "skills":
+                candidate = base / name
+                if candidate.is_dir() and (candidate / "SKILL.md").is_file():
+                    key = str(candidate)
+                    if key not in seen:
+                        seen.add(key)
+                        results.append({
+                            "name": name,
+                            "type": "skill",
+                            "type_plural": "skills",
+                            "path": candidate,
+                            "tool": tool_name,
+                        })
+            else:
+                candidate = base / f"{name}.md"
+                if candidate.is_file():
+                    key = str(candidate)
+                    if key not in seen:
+                        seen.add(key)
+                        singular = "command" if artifact_type == "commands" else "agent"
+                        results.append({
+                            "name": name,
+                            "type": singular,
+                            "type_plural": artifact_type,
+                            "path": candidate,
+                            "tool": tool_name,
+                        })
+
+    return results
+
+
+def _find_global_artifacts(
+    name: str,
+    tool_global_dirs: dict[str, dict[str, str]],
+    cache: list[dict],
+    tools_filter: list[str] | None,
+    type_filters: dict[str, Any] | None,
+) -> list[dict]:
+    """Find globally imported artifacts matching a name."""
+    type_prefix = None
+    search_name = name
+    if "/" in name:
+        type_prefix, search_name = name.split("/", 1)
+
+    matches = []
+    for tool_name, type_paths in tool_global_dirs.items():
+        if tools_filter and tool_name not in tools_filter:
+            continue
+
+        for artifact_type, global_path in type_paths.items():
+            if type_prefix and artifact_type != type_prefix:
+                continue
+            if type_filters and artifact_type not in type_filters:
+                continue
+
+            base = Path(global_path)
+            if artifact_type == "skills":
+                candidate = base / search_name
+                if candidate.is_dir() and (candidate / "SKILL.md").is_file():
+                    matches.append({
+                        "name": search_name,
+                        "type": "skill",
+                        "type_plural": "skills",
+                        "path": candidate,
+                        "tool": tool_name,
+                    })
+            else:
+                candidate = base / f"{search_name}.md"
+                if candidate.is_file():
+                    singular = "command" if artifact_type == "commands" else "agent"
+                    matches.append({
+                        "name": search_name,
+                        "type": singular,
+                        "type_plural": artifact_type,
+                        "path": candidate,
+                        "tool": tool_name,
+                    })
+
+    return matches
+
+
+def _find_all_global_artifacts(
+    tool_global_dirs: dict[str, dict[str, str]],
+    cache: list[dict],
+    tools_filter: list[str] | None,
+    type_filters: dict[str, Any] | None,
+) -> list[dict]:
+    """Find all globally imported artifacts that match filters."""
+    seen = set()
+    results = []
+
+    for entry in cache:
+        if tools_filter and entry["tool"] not in tools_filter:
+            continue
+
+        name = entry["name"]
+        tool_name = entry["tool"]
+
+        if tool_name not in tool_global_dirs:
+            continue
+
+        type_paths = tool_global_dirs[tool_name]
+        for artifact_type, global_path in type_paths.items():
+            if type_filters and artifact_type not in type_filters:
+                continue
+
+            base = Path(global_path)
+            if artifact_type == "skills":
+                candidate = base / name
+                if candidate.is_dir() and (candidate / "SKILL.md").is_file():
+                    key = str(candidate)
+                    if key not in seen:
+                        seen.add(key)
+                        results.append({
+                            "name": name,
+                            "type": "skill",
+                            "type_plural": "skills",
+                            "path": candidate,
+                            "tool": tool_name,
+                        })
+            else:
+                candidate = base / f"{name}.md"
+                if candidate.is_file():
+                    key = str(candidate)
+                    if key not in seen:
+                        seen.add(key)
+                        singular = "command" if artifact_type == "commands" else "agent"
+                        results.append({
+                            "name": name,
+                            "type": singular,
+                            "type_plural": artifact_type,
+                            "path": candidate,
+                            "tool": tool_name,
+                        })
+
+    return results
 
 
 def print_import_summary(result: dict[str, Any]) -> None:
@@ -1063,19 +2099,54 @@ def parse_selection(selection: str, max_val: int) -> list[int]:
 
 def handle_spelunk(args: argparse.Namespace) -> int:
     """Handle the spelunk command."""
-    target = Path(args.target).resolve()
+    target_str = getattr(args, "target", None)
+    global_spelunk = getattr(args, "global_spelunk", False)
+    tools_filter_str = getattr(args, "tools", None)
 
-    if not target.exists() or not target.is_dir():
-        print(f"Error: Target directory does not exist: {args.target}", file=sys.stderr)
-        return 1
+    tools_filter = None
+    if tools_filter_str:
+        global_tools = load_global_tools()
+        vault_tools_dict, _ = load_active_vault_tools()
+        tools_filter = [
+            resolve_tool_name(t.strip(), extra_tools=global_tools, vault_tools=vault_tools_dict)
+            for t in tools_filter_str.split(",")
+        ]
 
-    artifacts = discover_artifacts(target)
+    type_filters = resolve_type_filters(args)
+
+    if target_str is None or global_spelunk:
+        # Global config spelunk
+        if target_str is None and not global_spelunk:
+            print("No target specified — spelunking global config directories.\n")
+        artifacts = discover_global_artifacts(tools_filter=tools_filter)
+    else:
+        target = Path(target_str).resolve()
+        if not target.exists() or not target.is_dir():
+            print(f"Error: Target directory does not exist: {target_str}", file=sys.stderr)
+            return 1
+
+        if is_vault(target):
+            artifacts = discover_vault_artifacts(target)
+            if tools_filter:
+                # Tool filter doesn't apply to vault direct scan but we still accept it
+                pass
+        else:
+            artifacts = discover_artifacts(target)
+            if tools_filter:
+                artifacts = [a for a in artifacts if a["tool"] in tools_filter]
+
+    if type_filters:
+        artifacts = _apply_type_filters(artifacts, type_filters)
 
     if not artifacts:
-        print(f"No artifacts found in {args.target}")
+        label = target_str or "global config"
+        print(f"No artifacts found in {label}")
         return 0
 
-    import_cache = load_import_cache(target)
+    import_cache: dict[str, list[str]] = {}
+    if target_str and not global_spelunk:
+        target = Path(target_str).resolve()
+        import_cache = load_import_cache(target)
 
     rows = []
     for art in artifacts:
@@ -1129,6 +2200,10 @@ def handle_store(args: argparse.Namespace) -> int:
     vault_display_name = vault_info["vault_names"].get(vault_path_str, vault_path.name)
 
     artifacts = discover_artifacts(target)
+
+    type_filters = resolve_type_filters(args)
+    if type_filters:
+        artifacts = _apply_type_filters(artifacts, type_filters)
 
     if not artifacts:
         print(f"No artifacts found in {args.target_dir}")
@@ -1286,8 +2361,39 @@ def main() -> int:
         parser.print_help()
         return 0
 
-    if args.command == "import":
-        return handle_import(args)
+    if args.command == "list":
+        return handle_list(args)
+
+    if args.command == "rm":
+        return handle_rm(args)
+
+    if args.command in ("project", "proj"):
+        proj_cmd = getattr(args, "proj_command", None)
+        if proj_cmd is None:
+            parser.parse_args(["project", "--help"])
+            return 0
+        if proj_cmd == "import":
+            return handle_proj_import(args)
+        if proj_cmd == "rm":
+            return handle_proj_rm(args)
+        if proj_cmd == "wipe":
+            return handle_proj_wipe(args)
+        if proj_cmd == "list":
+            return handle_proj_list(args)
+
+    if args.command in ("config", "conf"):
+        conf_cmd = getattr(args, "conf_command", None)
+        if conf_cmd is None:
+            parser.parse_args(["config", "--help"])
+            return 0
+        if conf_cmd == "import":
+            return handle_conf_import(args)
+        if conf_cmd == "rm":
+            return handle_conf_rm(args)
+        if conf_cmd == "wipe":
+            return handle_conf_wipe(args)
+        if conf_cmd == "list":
+            return handle_conf_list(args)
 
     if args.command == "vault":
         if args.vault_command is None:

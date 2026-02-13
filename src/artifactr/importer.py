@@ -16,6 +16,29 @@ from .utils import is_git_repo
 ARTIFACTR_HEADER = "# Added by artifactr"
 
 
+def _type_included(artifact_type: str, artifact_name: str | None, type_filters: dict | None) -> bool:
+    """Check if an artifact type (and optionally name) passes type filters.
+
+    Args:
+        artifact_type: The plural artifact type (skills, commands, agents).
+        artifact_name: The artifact name, or None for type-level check.
+        type_filters: The type filter dict, or None for no filtering.
+
+    Returns:
+        True if the artifact should be included.
+    """
+    if type_filters is None:
+        return True
+    if artifact_type not in type_filters:
+        return False
+    filter_val = type_filters[artifact_type]
+    if filter_val is True:
+        return True
+    if isinstance(filter_val, list) and artifact_name is not None:
+        return artifact_name in filter_val
+    return artifact_name is None  # type-level check passes if type is in filters
+
+
 def add_to_git_exclude(repo_path: Path, patterns: list[str]) -> None:
     """Add patterns to the .git/info/exclude file.
 
@@ -251,6 +274,66 @@ def resolve_artifact_names(
     return resolved
 
 
+def remove_from_import_cache(
+    target: Path,
+    artifact_names: list[str],
+) -> None:
+    """Remove entries from .art-cache/imported for the given artifact names.
+
+    Args:
+        target: Path to the target directory.
+        artifact_names: List of artifact names to remove from cache.
+    """
+    cache_file = target / ".art-cache" / "imported"
+    if not cache_file.is_file():
+        return
+
+    names_set = set(artifact_names)
+    lines = cache_file.read_text(encoding="utf-8").splitlines()
+    remaining = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        parts = stripped.split(".")
+        if len(parts) >= 3:
+            artifact_name = parts[-1]
+            if artifact_name in names_set:
+                continue
+        remaining.append(stripped)
+
+    cache_file.write_text("\n".join(remaining) + ("\n" if remaining else ""), encoding="utf-8")
+
+
+def remove_from_global_import_cache(
+    artifact_names: list[str],
+) -> None:
+    """Remove entries from ~/.config/artifactr/.art-cache-global/imported.
+
+    Args:
+        artifact_names: List of artifact names to remove from global cache.
+    """
+    cache_file = Path.home() / ".config" / "artifactr" / ".art-cache-global" / "imported"
+    if not cache_file.is_file():
+        return
+
+    names_set = set(artifact_names)
+    lines = cache_file.read_text(encoding="utf-8").splitlines()
+    remaining = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        parts = stripped.split(".")
+        if len(parts) >= 3:
+            artifact_name = parts[-1]
+            if artifact_name in names_set:
+                continue
+        remaining.append(stripped)
+
+    cache_file.write_text("\n".join(remaining) + ("\n" if remaining else ""), encoding="utf-8")
+
+
 def import_artifacts(
     target: str,
     vault: str | None = None,
@@ -258,6 +341,8 @@ def import_artifacts(
     link: bool = False,
     artifacts: list[str] | None = None,
     force: bool = False,
+    no_exclude: bool = False,
+    type_filters: dict | None = None,
 ) -> dict[str, Any]:
     """Import artifacts from a vault into a target git repository.
 
@@ -363,6 +448,8 @@ def import_artifacts(
                 # Skip unsupported artifact types silently
                 if artifact_type not in supported:
                     continue
+                if not _type_included(artifact_type, art["name"], type_filters):
+                    continue
                 source = art["source"]
                 dest_path = tool_adapter.get_destination(artifact_type, target_path)
                 item_dest = dest_path / source.name
@@ -380,6 +467,10 @@ def import_artifacts(
         else:
             # Full import — only supported artifact types
             for artifact_type in supported:
+                if not _type_included(artifact_type, None, type_filters):
+                    imported[tool_name][artifact_type] = 0
+                    continue
+
                 source_path = get_source(artifact_type, vault_path)
 
                 # Skip if source doesn't exist or is empty
@@ -392,6 +483,10 @@ def import_artifacts(
                 # Copy or symlink each artifact in the source directory
                 artifact_count = 0
                 for item in source_path.iterdir():
+                    art_name = item.stem if item.is_file() else item.name
+                    if not _type_included(artifact_type, art_name, type_filters):
+                        continue
+
                     item_dest = dest_path / item.name
                     result = copy_with_prompt(item, item_dest, link=link, force=force)
                     if result["copied"] > 0:
@@ -400,7 +495,6 @@ def import_artifacts(
 
                     # Track successfully imported artifact names
                     if result["copied"] > 0:
-                        art_name = item.stem if item.is_file() else item.name
                         imported_artifact_names.append(art_name)
 
                     # Track pattern for git exclude (relative to repo root)
@@ -417,8 +511,11 @@ def import_artifacts(
             )
 
     # Add imported paths and .art-cache to .git/info/exclude
-    exclude_patterns.append(".art-cache")
-    add_to_git_exclude(target_path, exclude_patterns)
+    if no_exclude:
+        add_to_git_exclude(target_path, [".art-cache"])
+    else:
+        exclude_patterns.append(".art-cache")
+        add_to_git_exclude(target_path, exclude_patterns)
 
     return {
         "success": True,
@@ -491,6 +588,7 @@ def import_artifacts_global(
     link: bool = False,
     artifacts: list[str] | None = None,
     force: bool = False,
+    type_filters: dict | None = None,
 ) -> dict[str, Any]:
     """Import artifacts from a vault into global config directories.
 
@@ -588,6 +686,8 @@ def import_artifacts_global(
                 # Skip unsupported artifact types silently
                 if artifact_type not in supported:
                     continue
+                if not _type_included(artifact_type, art["name"], type_filters):
+                    continue
                 source = art["source"]
                 dest_path = tool_adapter.get_global_destination(artifact_type)
 
@@ -608,6 +708,10 @@ def import_artifacts_global(
         else:
             # Full import — only supported artifact types
             for artifact_type in supported:
+                if not _type_included(artifact_type, None, type_filters):
+                    imported[tool_name][artifact_type] = 0
+                    continue
+
                 source_path = get_source(artifact_type, vault_path)
 
                 # Skip if source doesn't exist or is empty
@@ -626,6 +730,10 @@ def import_artifacts_global(
                 # Copy or symlink each artifact in the source directory
                 artifact_count = 0
                 for item in source_path.iterdir():
+                    art_name = item.stem if item.is_file() else item.name
+                    if not _type_included(artifact_type, art_name, type_filters):
+                        continue
+
                     item_dest = dest_path / item.name
                     result = copy_with_prompt(item, item_dest, link=link, force=force)
                     if result["copied"] > 0:
@@ -634,7 +742,6 @@ def import_artifacts_global(
 
                     # Track successfully imported artifact names
                     if result["copied"] > 0:
-                        art_name = item.stem if item.is_file() else item.name
                         imported_artifact_names.append(art_name)
 
                 imported[tool_name][artifact_type] = artifact_count

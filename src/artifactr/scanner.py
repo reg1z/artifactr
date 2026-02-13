@@ -8,7 +8,12 @@ from pathlib import Path
 
 import yaml
 
-from .tools import get_tool_config_dirs
+from .tools import get_tool_config_dirs, get_tool_global_dirs
+
+
+def is_vault(directory: Path) -> bool:
+    """Check if a directory is a vault by looking for vault.yaml."""
+    return (directory / "vault.yaml").is_file()
 
 
 def discover_artifacts(target: Path) -> list[dict]:
@@ -67,6 +72,108 @@ def discover_artifacts(target: Path) -> list[dict]:
                             "path": item.resolve(),
                             "tool": tool_name,
                             "config_dir": repo_path,
+                        })
+
+    artifacts.sort(key=lambda a: (a["tool"], a["type"], a["name"]))
+    return artifacts
+
+
+def discover_vault_artifacts(vault_path: Path) -> list[dict]:
+    """Discover artifacts in a vault by scanning skills/, commands/, agents/ directly.
+
+    Args:
+        vault_path: Path to the vault directory.
+
+    Returns:
+        List of artifact dicts sorted by type then name.
+    """
+    artifacts = []
+
+    for artifact_type, singular in [("skills", "skill"), ("commands", "command"), ("agents", "agent")]:
+        base_path = vault_path / artifact_type
+        if not base_path.is_dir():
+            continue
+
+        if artifact_type == "skills":
+            for item in base_path.iterdir():
+                if item.is_dir() and (item / "SKILL.md").is_file():
+                    artifacts.append({
+                        "name": item.name,
+                        "type": singular,
+                        "type_plural": artifact_type,
+                        "path": item.resolve(),
+                        "tool": "vault",
+                        "config_dir": artifact_type,
+                    })
+        else:
+            for item in base_path.iterdir():
+                if item.is_file() and item.suffix == ".md":
+                    artifacts.append({
+                        "name": item.stem,
+                        "type": singular,
+                        "type_plural": artifact_type,
+                        "path": item.resolve(),
+                        "tool": "vault",
+                        "config_dir": artifact_type,
+                    })
+
+    artifacts.sort(key=lambda a: (a["type"], a["name"]))
+    return artifacts
+
+
+def discover_global_artifacts(tools_filter: list[str] | None = None) -> list[dict]:
+    """Discover artifacts in global config directories.
+
+    Args:
+        tools_filter: Optional list of tool names to filter to.
+
+    Returns:
+        List of artifact dicts sorted by tool, type, then name.
+    """
+    artifacts = []
+    tool_global_dirs = get_tool_global_dirs()
+
+    for tool_name, type_paths in tool_global_dirs.items():
+        if tools_filter and tool_name not in tools_filter:
+            continue
+
+        for artifact_type, global_path in type_paths.items():
+            base_path = Path(global_path)
+            if not base_path.is_dir():
+                continue
+
+            if artifact_type == "skills":
+                for item in base_path.iterdir():
+                    if item.is_dir() and (item / "SKILL.md").is_file():
+                        artifacts.append({
+                            "name": item.name,
+                            "type": "skill",
+                            "type_plural": "skills",
+                            "path": item.resolve(),
+                            "tool": tool_name,
+                            "config_dir": global_path,
+                        })
+            elif artifact_type == "agents":
+                for item in base_path.iterdir():
+                    if item.is_file() and item.suffix == ".md":
+                        artifacts.append({
+                            "name": item.stem,
+                            "type": "agent",
+                            "type_plural": "agents",
+                            "path": item.resolve(),
+                            "tool": tool_name,
+                            "config_dir": global_path,
+                        })
+            elif artifact_type == "commands":
+                for item in base_path.iterdir():
+                    if item.is_file() and item.suffix == ".md":
+                        artifacts.append({
+                            "name": item.stem,
+                            "type": "command",
+                            "type_plural": "commands",
+                            "path": item.resolve(),
+                            "tool": tool_name,
+                            "config_dir": global_path,
                         })
 
     artifacts.sort(key=lambda a: (a["tool"], a["type"], a["name"]))
