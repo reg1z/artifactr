@@ -2,12 +2,19 @@
 
 A cross-platform CLI tool for managing AI project artifacts. Maintain a personal library of skills, agents, and commands in centralized "vaults" and import them into any git repository for use with AI coding assistants.
 
+[Installation](#installation) •
+[Quickstart](#quickstart) •
+[Usage](#usage) •
+[Vault Structure](#vault-structure)
+
 ## *Why?* 🤔
 AI coding agents accumulate configs — skills, agents, commands — and they're usually project-local. Starting a new repo often means rebuilding your environment from scratch.
 
 I develop mostly in cloud VMs via `ssh` and `tmux` for security purposes. I got tired of rebuilding my setup every time and desperately wanted a *terminal-centric* solution. Lo-and-behold: **Artifactr**
 
 It takes inspiration from local-first note-taking applications like Obsidian and Logseq. No external connections are made. Your vaults contain YOUR files.
+
+![demo1.gif](https://github.com/reg1z/media-assets/blob/c6b5197783e04fd206240850785acf1953d7fb8f/artifactr/demo1.gif?raw=true)
 
 ## Features
 
@@ -45,7 +52,6 @@ art vault add ~/my-vault
 art store ~/repos/existing-project
 art import ~/repos/new-project
 ```
-
 
 ## Usage
 
