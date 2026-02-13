@@ -1,18 +1,18 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Tool alias map
-A mapping of tool aliases to canonical names MUST be maintained in the tool registry.
+A mapping of tool aliases to canonical names MUST be derived from tool definitions (built-in, global config, and vault config) rather than maintained as a separate hardcoded dictionary.
 
 #### Scenario: Claude alias
-- **WHEN** the alias map is loaded
-- **THEN** `claude` MUST map to `claude-code`
+- **WHEN** aliases are resolved from tool definitions
+- **THEN** `claude` MUST map to `claude-code` (defined in the `claude-code` built-in's `aliases` field)
 
 #### Scenario: Extensibility
 - **WHEN** a new alias needs to be added
-- **THEN** it MUST only require adding an entry to the `TOOL_ALIASES` dict
+- **THEN** it MUST only require adding an entry to the tool definition's `aliases` list (in built-in defaults, global config, or vault config)
 
 ### Requirement: Tool name resolution
-A `resolve_tool_name()` function MUST resolve aliases to canonical names.
+A `resolve_tool_name()` function MUST resolve aliases to canonical names by scanning all loaded tool definitions for matching aliases.
 
 #### Scenario: Known alias
 - **WHEN** `resolve_tool_name("claude")` is called
@@ -26,16 +26,20 @@ A `resolve_tool_name()` function MUST resolve aliases to canonical names.
 - **WHEN** `resolve_tool_name("unknown-tool")` is called
 - **THEN** it MUST return `"unknown-tool"` unchanged (validation happens elsewhere)
 
+#### Scenario: Custom tool alias
+- **WHEN** a user defines a tool with `aliases: ["cx"]` and `resolve_tool_name("cx")` is called
+- **THEN** it MUST return the canonical tool name
+
 ### Requirement: Alias-aware tool lookup
 The `get_tool()` function MUST resolve aliases before looking up the tool adapter.
 
 #### Scenario: Lookup by alias
 - **WHEN** `get_tool("claude")` is called
-- **THEN** it MUST return the `ClaudeCodeAdapter` instance
+- **THEN** it MUST return the `GenericToolAdapter` instance for `claude-code`
 
 #### Scenario: Lookup by canonical name
 - **WHEN** `get_tool("claude-code")` is called
-- **THEN** it MUST continue to return the `ClaudeCodeAdapter` instance
+- **THEN** it MUST return the `GenericToolAdapter` instance for `claude-code`
 
 ### Requirement: Alias-aware validation
 All code paths that validate tool names against the supported tools list MUST resolve aliases first.
@@ -53,12 +57,18 @@ All code paths that validate tool names against the supported tools list MUST re
 - **THEN** the default tool MUST be set to `claude-code`
 
 ### Requirement: Tool list alias display
-The `art tool list` command MUST show aliases alongside canonical names.
+The `art tool list` command MUST show aliases in a dedicated column.
 
 #### Scenario: Alias display format
 - **WHEN** `art tool list` is run and a tool has aliases
-- **THEN** the alias MUST be displayed in parentheses: `claude-code (alias: claude)`
+- **THEN** aliases MUST be displayed in a dedicated `Aliases` column
 
 #### Scenario: No alias
 - **WHEN** a tool has no aliases
-- **THEN** only the canonical name is displayed (no alias annotation)
+- **THEN** the Aliases column MUST show `-` or be empty
+
+## REMOVED Requirements
+
+### Requirement: TOOL_ALIASES dict
+**Reason**: Aliases are now stored within tool definitions rather than a separate `TOOL_ALIASES` dictionary.
+**Migration**: Aliases are defined in the `aliases` field of each tool definition (built-in defaults, global config, or vault config).

@@ -5,7 +5,7 @@ The `art import` command imports artifacts from a vault into a target git reposi
 
 #### Scenario: Basic import
 - **WHEN** `art import <target>` is run
-- **THEN** all artifacts from the default vault are imported to the target repo for the current default tool.
+- **THEN** all artifacts from the default vault are imported to the target repo for the current default tool, limited to artifact types the tool supports.
 
 #### Scenario: Vault selection
 - **WHEN** `--vault=<name-or-path>` is provided
@@ -18,6 +18,10 @@ The `art import` command imports artifacts from a vault into a target git reposi
 #### Scenario: Tool alias in import
 - **WHEN** `art import <target> --tools=claude` is run
 - **THEN** `claude` MUST be resolved to `claude-code` and the import MUST proceed normally
+
+#### Scenario: Partial tool import
+- **WHEN** `art import <target> --tools=codex` is run and the vault contains skills, commands, and agents
+- **THEN** only skills MUST be imported (codex only supports skills); commands and agents MUST be silently skipped
 
 #### Scenario: Missing target
 - **WHEN** no target is provided and `--global` is not set
@@ -46,3 +50,7 @@ The `art import` command imports artifacts from a vault into a target git reposi
 #### Scenario: Symlink mode
 - **WHEN** `--link` or `-l` is provided
 - **THEN** artifacts are symlinked instead of copied
+
+#### Scenario: Vault tool definitions loaded
+- **WHEN** an import uses a specific vault that has `vault.yaml` with tool definitions
+- **THEN** those vault tool definitions MUST participate in tool resolution with highest precedence
