@@ -107,6 +107,58 @@ def load_vault_metadata(vault_path: str | Path) -> dict[str, Any]:
     }
 
 
+def load_active_vault_tools() -> tuple[dict[str, dict], str | None]:
+    """Load tool definitions from the default vault.
+
+    Returns:
+        Tuple of (tools_dict, vault_name). Returns ({}, None) if no default vault.
+    """
+    from .catalog import get_default_vault
+
+    default_vault = get_default_vault()
+    if default_vault is None:
+        return {}, None
+
+    meta = load_vault_metadata(default_vault)
+    return meta.get("tools", {}), meta.get("name")
+
+
+def load_all_vault_tools() -> list[tuple[str | None, str, dict[str, dict]]]:
+    """Iterate all registered vaults and collect their tool definitions.
+
+    Returns:
+        List of (vault_name, vault_path, tools_dict) tuples.
+    """
+    from .catalog import list_vaults
+
+    info = list_vaults()
+    result = []
+    for vault_path in info["vaults"]:
+        meta = load_vault_metadata(vault_path)
+        vault_name = meta.get("name") or info["vault_names"].get(vault_path)
+        result.append((vault_name, vault_path, meta.get("tools", {})))
+    return result
+
+
+def load_cwd_vault_tools() -> dict[str, dict]:
+    """Read tool definitions from a vault.yaml in the current working directory.
+
+    Returns:
+        Tools dict from ./vault.yaml, or empty dict if not present.
+    """
+    meta_path = Path.cwd() / "vault.yaml"
+    if not meta_path.exists():
+        return {}
+
+    with open(meta_path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+
+    if data is None:
+        return {}
+
+    return data.get("tools", {}) or {}
+
+
 def save_vault_metadata(vault_path: str | Path, metadata: dict[str, Any]) -> None:
     """Write vault.yaml to a vault directory."""
     meta_path = Path(vault_path) / "vault.yaml"

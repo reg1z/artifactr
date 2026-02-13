@@ -273,5 +273,519 @@ class TestVaultMetadata:
         assert meta["name"] == "portable-name"
 
 
+class TestLoadActiveVaultTools:
+    """Tests for load_active_vault_tools()."""
+
+    def test_default_vault_with_tools(self, tmp_path):
+        """Verify tools returned when default vault has tools defined."""
+        from artifactr.config import load_active_vault_tools
+
+        vault_dir = tmp_path / "vault1"
+        vault_dir.mkdir()
+        save_vault_metadata(vault_dir, {
+            "name": "test-vault",
+            "tools": {"custom": {"skills": ".custom/skills"}},
+        })
+
+        config = {
+            "vaults": [str(vault_dir)],
+            "default_vault": str(vault_dir),
+            "default_tool": "opencode",
+            "vault_names": {},
+            "tools": {},
+        }
+        with mock.patch("artifactr.config.load_config", return_value=config), \
+             mock.patch("artifactr.catalog.load_config", return_value=config):
+            tools, name = load_active_vault_tools()
+        assert "custom" in tools
+        assert name == "test-vault"
+
+    def test_default_vault_without_tools(self, tmp_path):
+        """Verify empty tools when default vault has no tools section."""
+        from artifactr.config import load_active_vault_tools
+
+        vault_dir = tmp_path / "vault1"
+        vault_dir.mkdir()
+        save_vault_metadata(vault_dir, {"name": "empty-vault"})
+
+        config = {
+            "vaults": [str(vault_dir)],
+            "default_vault": str(vault_dir),
+            "default_tool": "opencode",
+            "vault_names": {},
+            "tools": {},
+        }
+        with mock.patch("artifactr.config.load_config", return_value=config), \
+             mock.patch("artifactr.catalog.load_config", return_value=config):
+            tools, name = load_active_vault_tools()
+        assert tools == {}
+        assert name == "empty-vault"
+
+    def test_no_default_vault(self):
+        """Verify ({}, None) when no default vault is set."""
+        from artifactr.config import load_active_vault_tools
+
+        config = {
+            "vaults": [],
+            "default_vault": None,
+            "default_tool": "opencode",
+            "vault_names": {},
+            "tools": {},
+        }
+        with mock.patch("artifactr.config.load_config", return_value=config), \
+             mock.patch("artifactr.catalog.load_config", return_value=config):
+            tools, name = load_active_vault_tools()
+        assert tools == {}
+        assert name is None
+
+
+class TestLoadAllVaultTools:
+    """Tests for load_all_vault_tools()."""
+
+    def test_multiple_vaults(self, tmp_path):
+        """Verify all vaults returned with their tools."""
+        from artifactr.config import load_all_vault_tools
+
+        vault1 = tmp_path / "v1"
+        vault1.mkdir()
+        save_vault_metadata(vault1, {
+            "name": "vault-one",
+            "tools": {"tool-a": {"skills": ".a/skills"}},
+        })
+
+        vault2 = tmp_path / "v2"
+        vault2.mkdir()
+        save_vault_metadata(vault2, {"name": "vault-two"})
+
+        config = {
+            "vaults": [str(vault1), str(vault2)],
+            "default_vault": str(vault1),
+            "default_tool": "opencode",
+            "vault_names": {},
+            "tools": {},
+        }
+        with mock.patch("artifactr.config.load_config", return_value=config), \
+             mock.patch("artifactr.catalog.load_config", return_value=config):
+            result = load_all_vault_tools()
+        assert len(result) == 2
+        assert result[0][0] == "vault-one"
+        assert "tool-a" in result[0][2]
+        assert result[1][0] == "vault-two"
+        assert result[1][2] == {}
+
+    def test_empty_catalog(self):
+        """Verify empty list when no vaults registered."""
+        from artifactr.config import load_all_vault_tools
+
+        config = {
+            "vaults": [],
+            "default_vault": None,
+            "default_tool": "opencode",
+            "vault_names": {},
+            "tools": {},
+        }
+        with mock.patch("artifactr.config.load_config", return_value=config), \
+             mock.patch("artifactr.catalog.load_config", return_value=config):
+            result = load_all_vault_tools()
+        assert result == []
+
+
+class TestLoadCwdVaultTools:
+    """Tests for load_cwd_vault_tools()."""
+
+    def test_vault_yaml_present(self, tmp_path):
+        """Verify tools loaded from CWD vault.yaml."""
+        from artifactr.config import load_cwd_vault_tools
+
+        vault_yaml = tmp_path / "vault.yaml"
+        vault_yaml.write_text(yaml.dump({
+            "tools": {"local-tool": {"skills": ".local/skills"}},
+        }))
+
+        with mock.patch("artifactr.config.Path") as mock_path_cls:
+            mock_cwd = mock.MagicMock()
+            mock_cwd.__truediv__ = mock.MagicMock(return_value=vault_yaml)
+            mock_path_cls.cwd.return_value = mock_cwd
+            result = load_cwd_vault_tools()
+        assert "local-tool" in result
+
+    def test_vault_yaml_absent(self, tmp_path):
+        """Verify empty dict when no vault.yaml in CWD."""
+        from artifactr.config import load_cwd_vault_tools
+
+        missing = tmp_path / "vault.yaml"
+
+        with mock.patch("artifactr.config.Path") as mock_path_cls:
+            mock_cwd = mock.MagicMock()
+            mock_cwd.__truediv__ = mock.MagicMock(return_value=missing)
+            mock_path_cls.cwd.return_value = mock_cwd
+            result = load_cwd_vault_tools()
+        assert result == {}
+
+    def test_vault_yaml_no_tools_section(self, tmp_path):
+        """Verify empty dict when vault.yaml has no tools key."""
+        from artifactr.config import load_cwd_vault_tools
+
+        vault_yaml = tmp_path / "vault.yaml"
+        vault_yaml.write_text(yaml.dump({"name": "some-vault"}))
+
+        with mock.patch("artifactr.config.Path") as mock_path_cls:
+            mock_cwd = mock.MagicMock()
+            mock_cwd.__truediv__ = mock.MagicMock(return_value=vault_yaml)
+            mock_path_cls.cwd.return_value = mock_cwd
+            result = load_cwd_vault_tools()
+        assert result == {}
+
+
+class TestToolListVaultAware:
+    """Tests for handle_tool_list with vault awareness."""
+
+    def test_includes_vault_tools(self, tmp_path, capsys):
+        """Verify vault-defined tools appear in tool list output."""
+        import argparse
+        from artifactr.cli import handle_tool_list
+
+        vault_dir = tmp_path / "vault1"
+        vault_dir.mkdir()
+        save_vault_metadata(vault_dir, {
+            "name": "test-vault",
+            "tools": {"vault-tool": {"skills": ".vt/skills"}},
+        })
+
+        config = {
+            "vaults": [str(vault_dir)],
+            "default_vault": str(vault_dir),
+            "default_tool": "opencode",
+            "vault_names": {},
+            "tools": {},
+        }
+
+        args = argparse.Namespace(vault=None)
+        with mock.patch("artifactr.config.load_config", return_value=config), \
+             mock.patch("artifactr.catalog.load_config", return_value=config):
+            handle_tool_list(args)
+
+        output = capsys.readouterr().out
+        assert "vault-tool" in output
+
+    def test_vault_flag_uses_specific_vault(self, tmp_path, capsys):
+        """Verify --vault=X uses that vault's tools."""
+        import argparse
+        from artifactr.cli import handle_tool_list
+
+        vault_dir = tmp_path / "vault1"
+        vault_dir.mkdir()
+        save_vault_metadata(vault_dir, {
+            "name": "alt-vault",
+            "tools": {"alt-tool": {"skills": ".alt/skills"}},
+        })
+
+        config = {
+            "vaults": [str(vault_dir)],
+            "default_vault": None,
+            "default_tool": "opencode",
+            "vault_names": {str(vault_dir): "alt-vault"},
+            "tools": {},
+        }
+
+        args = argparse.Namespace(vault="alt-vault")
+        with mock.patch("artifactr.config.load_config", return_value=config), \
+             mock.patch("artifactr.catalog.load_config", return_value=config):
+            handle_tool_list(args)
+
+        output = capsys.readouterr().out
+        assert "alt-tool" in output
+
+
+class TestToolSelectVaultAware:
+    """Tests for handle_tool_select with vault awareness."""
+
+    def test_select_vault_tool(self, tmp_path, capsys):
+        """Verify vault-defined tool can be selected."""
+        import argparse
+        from artifactr.cli import handle_tool_select
+
+        vault_dir = tmp_path / "vault1"
+        vault_dir.mkdir()
+        save_vault_metadata(vault_dir, {
+            "name": "test-vault",
+            "tools": {"vault-tool": {"skills": ".vt/skills"}},
+        })
+
+        config = {
+            "vaults": [str(vault_dir)],
+            "default_vault": str(vault_dir),
+            "default_tool": "opencode",
+            "vault_names": {},
+            "tools": {},
+        }
+
+        args = argparse.Namespace(name="vault-tool")
+        with mock.patch("artifactr.config.load_config", return_value=config), \
+             mock.patch("artifactr.catalog.load_config", return_value=config), \
+             mock.patch("artifactr.cli.select_default_tool", return_value=True) as mock_select:
+            result = handle_tool_select(args)
+
+        assert result == 0
+        mock_select.assert_called_once_with("vault-tool", mock.ANY)
+        output = capsys.readouterr().out
+        assert "vault-tool" in output
+
+
+class TestToolInfoCatalog:
+    """Tests for art tool info catalog view."""
+
+    def test_catalog_shows_grouped_tools(self, tmp_path, capsys):
+        """Verify catalog view shows tools grouped by source."""
+        import argparse
+        from artifactr.cli import handle_tool_info
+
+        vault_dir = tmp_path / "vault1"
+        vault_dir.mkdir()
+        save_vault_metadata(vault_dir, {
+            "name": "test-vault",
+            "tools": {"vault-tool": {"skills": ".vt/skills"}},
+        })
+
+        config = {
+            "vaults": [str(vault_dir)],
+            "default_vault": str(vault_dir),
+            "default_tool": "opencode",
+            "vault_names": {},
+            "tools": {"global-tool": {"skills": ".gt/skills"}},
+        }
+
+        args = argparse.Namespace(name=None, vault=None, global_filter=False)
+        with mock.patch("artifactr.config.load_config", return_value=config), \
+             mock.patch("artifactr.catalog.load_config", return_value=config), \
+             mock.patch("artifactr.cli.load_cwd_vault_tools", return_value={}):
+            handle_tool_info(args)
+
+        output = capsys.readouterr().out
+        assert "BUILT-IN" in output
+        assert "GLOBAL CONFIG" in output
+        assert "global-tool" in output
+        assert "VAULT: test-vault" in output
+        assert "vault-tool" in output
+
+
+class TestToolInfoDetail:
+    """Tests for art tool info <name> detail view."""
+
+    def test_shows_all_definitions(self, tmp_path, capsys):
+        """Verify detail view shows all definitions with active/overridden markers."""
+        import argparse
+        from artifactr.cli import handle_tool_info
+
+        vault_dir = tmp_path / "vault1"
+        vault_dir.mkdir()
+        save_vault_metadata(vault_dir, {
+            "name": "test-vault",
+            "tools": {"claude-code": {"skills": ".vault-claude/skills"}},
+        })
+
+        config = {
+            "vaults": [str(vault_dir)],
+            "default_vault": str(vault_dir),
+            "default_tool": "opencode",
+            "vault_names": {},
+            "tools": {},
+        }
+
+        args = argparse.Namespace(name="claude-code", vault=None, global_filter=False)
+        with mock.patch("artifactr.config.load_config", return_value=config), \
+             mock.patch("artifactr.catalog.load_config", return_value=config), \
+             mock.patch("artifactr.cli.load_cwd_vault_tools", return_value={}):
+            result = handle_tool_info(args)
+
+        assert result == 0
+        output = capsys.readouterr().out
+        assert "BUILT-IN" in output
+        assert "(overridden)" in output
+        assert "ACTIVE" in output
+        assert "VAULT: test-vault" in output
+
+
+class TestToolInfoVaultFilter:
+    """Tests for art tool info --vault filtering."""
+
+    def test_vault_no_value_filters_default(self, tmp_path, capsys):
+        """Verify --vault (no value) filters to default vault."""
+        import argparse
+        from artifactr.cli import handle_tool_info
+
+        vault_dir = tmp_path / "vault1"
+        vault_dir.mkdir()
+        save_vault_metadata(vault_dir, {
+            "name": "default-vault",
+            "tools": {"vault-tool": {"skills": ".vt/skills"}},
+        })
+
+        config = {
+            "vaults": [str(vault_dir)],
+            "default_vault": str(vault_dir),
+            "default_tool": "opencode",
+            "vault_names": {},
+            "tools": {"global-tool": {"skills": ".gt/skills"}},
+        }
+
+        args = argparse.Namespace(name=None, vault=True, global_filter=False)
+        with mock.patch("artifactr.config.load_config", return_value=config), \
+             mock.patch("artifactr.catalog.load_config", return_value=config), \
+             mock.patch("artifactr.cli.load_cwd_vault_tools", return_value={}):
+            result = handle_tool_info(args)
+
+        assert result == 0
+        output = capsys.readouterr().out
+        assert "vault-tool" in output
+        # Should NOT show global or built-in sections in vault filter mode
+        assert "BUILT-IN" not in output
+
+    def test_vault_specific_filters_to_vault(self, tmp_path, capsys):
+        """Verify --vault=X filters to specific vault."""
+        import argparse
+        from artifactr.cli import handle_tool_info
+
+        vault_dir = tmp_path / "vault1"
+        vault_dir.mkdir()
+        save_vault_metadata(vault_dir, {
+            "name": "specific-vault",
+            "tools": {"my-tool": {"skills": ".mt/skills"}},
+        })
+
+        config = {
+            "vaults": [str(vault_dir)],
+            "default_vault": str(vault_dir),
+            "default_tool": "opencode",
+            "vault_names": {str(vault_dir): "specific-vault"},
+            "tools": {},
+        }
+
+        args = argparse.Namespace(name=None, vault="specific-vault", global_filter=False)
+        with mock.patch("artifactr.config.load_config", return_value=config), \
+             mock.patch("artifactr.catalog.load_config", return_value=config), \
+             mock.patch("artifactr.cli.load_cwd_vault_tools", return_value={}):
+            result = handle_tool_info(args)
+
+        assert result == 0
+        output = capsys.readouterr().out
+        assert "my-tool" in output
+
+
+class TestToolInfoGlobalFilter:
+    """Tests for art tool info --global filtering."""
+
+    def test_global_filter(self, capsys):
+        """Verify --global filters to global config tools only."""
+        import argparse
+        from artifactr.cli import handle_tool_info
+
+        config = {
+            "vaults": [],
+            "default_vault": None,
+            "default_tool": "opencode",
+            "vault_names": {},
+            "tools": {"my-global-tool": {"skills": ".mgt/skills"}},
+        }
+
+        args = argparse.Namespace(name=None, vault=None, global_filter=True)
+        with mock.patch("artifactr.config.load_config", return_value=config), \
+             mock.patch("artifactr.catalog.load_config", return_value=config), \
+             mock.patch("artifactr.cli.load_cwd_vault_tools", return_value={}):
+            result = handle_tool_info(args)
+
+        assert result == 0
+        output = capsys.readouterr().out
+        assert "GLOBAL CONFIG" in output
+        assert "my-global-tool" in output
+        assert "BUILT-IN" not in output
+
+
+class TestToolInfoDetailVaultFilter:
+    """Tests for art tool info <name> --vault=X."""
+
+    def test_detail_vault_filter(self, tmp_path, capsys):
+        """Verify detail view with --vault=X shows only that vault's definition."""
+        import argparse
+        from artifactr.cli import handle_tool_info
+
+        vault_dir = tmp_path / "vault1"
+        vault_dir.mkdir()
+        save_vault_metadata(vault_dir, {
+            "name": "test-vault",
+            "tools": {"claude-code": {"skills": ".vault-claude/skills"}},
+        })
+
+        config = {
+            "vaults": [str(vault_dir)],
+            "default_vault": str(vault_dir),
+            "default_tool": "opencode",
+            "vault_names": {str(vault_dir): "test-vault"},
+            "tools": {},
+        }
+
+        args = argparse.Namespace(name="claude-code", vault="test-vault", global_filter=False)
+        with mock.patch("artifactr.config.load_config", return_value=config), \
+             mock.patch("artifactr.catalog.load_config", return_value=config), \
+             mock.patch("artifactr.cli.load_cwd_vault_tools", return_value={}):
+            result = handle_tool_info(args)
+
+        assert result == 0
+        output = capsys.readouterr().out
+        assert "VAULT: test-vault" in output
+        # Should NOT show built-in section with vault filter
+        assert "BUILT-IN" not in output
+
+
+class TestToolInfoNoResults:
+    """Tests for filter flags with no matching tools."""
+
+    def test_global_filter_no_tools(self, capsys):
+        """Verify message when --global but no global tools defined."""
+        import argparse
+        from artifactr.cli import handle_tool_info
+
+        config = {
+            "vaults": [],
+            "default_vault": None,
+            "default_tool": "opencode",
+            "vault_names": {},
+            "tools": {},
+        }
+
+        args = argparse.Namespace(name=None, vault=None, global_filter=True)
+        with mock.patch("artifactr.config.load_config", return_value=config), \
+             mock.patch("artifactr.catalog.load_config", return_value=config), \
+             mock.patch("artifactr.cli.load_cwd_vault_tools", return_value={}):
+            result = handle_tool_info(args)
+
+        assert result == 0
+        output = capsys.readouterr().out
+        assert "no tools defined" in output
+
+    def test_detail_unknown_tool(self, capsys):
+        """Verify error for unknown tool name."""
+        import argparse
+        from artifactr.cli import handle_tool_info
+
+        config = {
+            "vaults": [],
+            "default_vault": None,
+            "default_tool": "opencode",
+            "vault_names": {},
+            "tools": {},
+        }
+
+        args = argparse.Namespace(name="nonexistent", vault=None, global_filter=False)
+        with mock.patch("artifactr.config.load_config", return_value=config), \
+             mock.patch("artifactr.catalog.load_config", return_value=config), \
+             mock.patch("artifactr.cli.load_cwd_vault_tools", return_value={}):
+            result = handle_tool_info(args)
+
+        assert result == 1
+        err = capsys.readouterr().err
+        assert "Unknown tool" in err
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

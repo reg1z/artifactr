@@ -25,6 +25,9 @@ from .catalog import (
     select_default_tool,
 )
 from .config import (
+    load_active_vault_tools,
+    load_all_vault_tools,
+    load_cwd_vault_tools,
     load_global_tools,
     load_vault_metadata,
     save_global_tools,
@@ -150,7 +153,8 @@ def create_parser() -> argparse.ArgumentParser:
     tool_select.add_argument("name", help="Tool name")
 
     # tool list
-    tool_subparsers.add_parser("list", help="List supported tools")
+    tool_list = tool_subparsers.add_parser("list", help="List supported tools")
+    tool_list.add_argument("--vault", help="Use tools from this vault instead of the default vault")
 
     # tool add
     tool_add = tool_subparsers.add_parser("add", help="Add a custom tool definition")
@@ -180,9 +184,17 @@ def create_parser() -> argparse.ArgumentParser:
         help="Explicitly remove from global config (default behavior)",
     )
 
-    # tool show
-    tool_show = tool_subparsers.add_parser("show", help="Show a tool's configuration")
-    tool_show.add_argument("name", help="Tool identifier to display")
+    # tool info
+    tool_info = tool_subparsers.add_parser("info", help="Show tool information and catalog")
+    tool_info.add_argument("name", nargs="?", help="Tool identifier to display (omit for catalog view)")
+    tool_info.add_argument(
+        "--vault", nargs="?", const=True, default=None,
+        help="Filter to vault tools (no value = default vault, with value = specific vault)",
+    )
+    tool_info.add_argument(
+        "-g", "--global", action="store_true", dest="global_filter",
+        help="Filter to global config tools only",
+    )
 
     # spelunk command
     spelunk_parser = subparsers.add_parser(
@@ -576,9 +588,11 @@ def handle_vault_name(args: argparse.Namespace) -> int:
 def handle_tool_select(args: argparse.Namespace) -> int:
     """Handle the tool select command."""
     global_tools = load_global_tools()
-    supported_tools = get_supported_tools(global_tools=global_tools)
-    if select_default_tool(args.name, supported_tools):
-        print(f"Default tool set to: {args.name}")
+    vault_tools, _ = load_active_vault_tools()
+    supported_tools = get_supported_tools(global_tools=global_tools, vault_tools=vault_tools)
+    resolved = resolve_tool_name(args.name, extra_tools=global_tools, vault_tools=vault_tools)
+    if select_default_tool(resolved, supported_tools):
+        print(f"Default tool set to: {resolved}")
         return 0
     else:
         print(
@@ -591,23 +605,35 @@ def handle_tool_select(args: argparse.Namespace) -> int:
 
 def handle_tool_list(args: argparse.Namespace) -> int:
     """Handle the tool list command."""
-    _ = args
     global_tools = load_global_tools()
-    supported_tools = get_supported_tools(global_tools=global_tools)
+
+    vault_identifier = getattr(args, "vault", None)
+    if vault_identifier:
+        vault_path = get_vault_by_name_or_path(vault_identifier)
+        if vault_path is None:
+            print(f"Error: Vault not found: {vault_identifier}", file=sys.stderr)
+            return 1
+        meta = load_vault_metadata(vault_path)
+        vault_tools = meta.get("tools", {})
+        vault_name = meta.get("name")
+    else:
+        vault_tools, vault_name = load_active_vault_tools()
+
+    supported_tools = get_supported_tools(global_tools=global_tools, vault_tools=vault_tools)
     info = list_tools_info(supported_tools)
 
     # Build table rows
     rows = []
     for tool_name in info["tools"]:
-        adapter = get_tool(tool_name, global_tools=global_tools)
+        adapter = get_tool(tool_name, global_tools=global_tools, vault_tools=vault_tools)
         if adapter is None:
             continue
 
-        source = get_tool_source(tool_name, global_tools=global_tools)
+        source = get_tool_source(tool_name, global_tools=global_tools, vault_tools=vault_tools, vault_name=vault_name)
         skills_col = "yes" if "skills" in adapter.supported_types else "-"
         commands_col = "yes" if "commands" in adapter.supported_types else "-"
         agents_col = "yes" if "agents" in adapter.supported_types else "-"
-        aliases = get_aliases_for_tool(tool_name, extra_tools=global_tools)
+        aliases = get_aliases_for_tool(tool_name, extra_tools=global_tools, vault_tools=vault_tools)
         alias_col = ", ".join(aliases) if aliases else "-"
 
         default_marker = " *" if tool_name == info["default"] else ""
@@ -733,39 +759,274 @@ def handle_tool_rm(args: argparse.Namespace) -> int:
     return 0
 
 
-def handle_tool_show(args: argparse.Namespace) -> int:
-    """Handle the tool show command."""
-    tool_name = args.name
+def handle_tool_info(args: argparse.Namespace) -> int:
+    """Handle the tool info command."""
+    tool_name = getattr(args, "name", None)
+    vault_flag = getattr(args, "vault", None)
+    global_filter = getattr(args, "global_filter", False)
+
     global_tools = load_global_tools()
-    adapter = get_tool(tool_name, global_tools=global_tools)
+    default_vault_tools, default_vault_name = load_active_vault_tools()
+    default_vault_path = get_default_vault()
+    all_vault_data = load_all_vault_tools()
+    cwd_tools = load_cwd_vault_tools()
 
-    if adapter is None:
-        print(f"Error: Unknown tool: {tool_name}", file=sys.stderr)
-        return 1
+    # Resolve vault filter
+    filter_vault_path: str | None = None
+    filter_vault_name: str | None = None
+    if vault_flag is True:
+        # --vault with no value → default vault
+        if default_vault_path is None:
+            print("Error: No default vault configured.", file=sys.stderr)
+            return 1
+        filter_vault_path = default_vault_path
+        filter_vault_name = default_vault_name
+    elif vault_flag is not None:
+        # --vault=X → specific vault
+        resolved_path = get_vault_by_name_or_path(vault_flag)
+        if resolved_path is None:
+            print(f"Error: Vault not found: {vault_flag}", file=sys.stderr)
+            return 1
+        filter_vault_path = resolved_path
+        meta = load_vault_metadata(resolved_path)
+        filter_vault_name = meta.get("name")
 
-    # Resolve alias if needed
-    resolved_name = resolve_tool_name(tool_name, extra_tools=global_tools)
+    if tool_name is None:
+        return _tool_info_catalog(
+            global_tools=global_tools,
+            all_vault_data=all_vault_data,
+            cwd_tools=cwd_tools,
+            default_vault_path=default_vault_path,
+            global_filter=global_filter,
+            filter_vault_path=filter_vault_path,
+            filter_vault_name=filter_vault_name,
+        )
+    else:
+        return _tool_info_detail(
+            tool_name=tool_name,
+            global_tools=global_tools,
+            default_vault_tools=default_vault_tools,
+            default_vault_name=default_vault_name,
+            default_vault_path=default_vault_path,
+            all_vault_data=all_vault_data,
+            cwd_tools=cwd_tools,
+            global_filter=global_filter,
+            filter_vault_path=filter_vault_path,
+            filter_vault_name=filter_vault_name,
+        )
 
-    source = get_tool_source(resolved_name, global_tools=global_tools)
-    aliases = get_aliases_for_tool(resolved_name, extra_tools=global_tools)
 
-    print(f"Tool: {resolved_name}")
-    print(f"Source: {source}")
-    if aliases:
-        print(f"Aliases: {', '.join(aliases)}")
+def _tool_info_catalog(
+    global_tools: dict[str, dict],
+    all_vault_data: list[tuple[str | None, str, dict[str, dict]]],
+    cwd_tools: dict[str, dict],
+    default_vault_path: str | None,
+    global_filter: bool,
+    filter_vault_path: str | None,
+    filter_vault_name: str | None,
+) -> int:
+    """Display the catalog view: all tools grouped by source."""
+    found_any = False
 
-    print("\nArtifact support:")
-    for art_type in ("skills", "commands", "agents"):
-        if art_type in adapter.supported_types:
-            repo_path = adapter._config.get(art_type, "")
-            global_key = f"global_{art_type}"
-            global_path = adapter._config.get(global_key, "")
-            print(f"  {art_type}:")
-            print(f"    repo-local: {repo_path}")
-            if global_path:
-                print(f"    global:     {global_path}")
+    # BUILT-IN section
+    if not global_filter and filter_vault_path is None:
+        print("BUILT-IN")
+        for name in sorted(BUILTIN_TOOLS):
+            aliases = BUILTIN_TOOLS[name].get("aliases", [])
+            alias_str = f" (aliases: {', '.join(aliases)})" if aliases else ""
+            print(f"  {name}{alias_str}")
+        found_any = True
+
+    # GLOBAL CONFIG section
+    if not filter_vault_path or global_filter:
+        if global_tools:
+            if found_any:
+                print()
+            print("GLOBAL CONFIG")
+            for name in sorted(global_tools):
+                aliases = global_tools[name].get("aliases", [])
+                alias_str = f" (aliases: {', '.join(aliases)})" if aliases else ""
+                print(f"  {name}{alias_str}")
+            found_any = True
+        elif global_filter:
+            print("GLOBAL CONFIG")
+            print("  (no tools defined)")
+            found_any = True
+
+    if global_filter:
+        return 0
+
+    # Per-vault sections
+    if filter_vault_path is not None:
+        # Filter to a specific vault
+        for vault_name, vault_path, tools in all_vault_data:
+            if vault_path == filter_vault_path:
+                if found_any:
+                    print()
+                default_marker = " (default)" if vault_path == default_vault_path else ""
+                label = vault_name or vault_path
+                print(f"VAULT: {label}{default_marker}")
+                if tools:
+                    for name in sorted(tools):
+                        aliases = tools[name].get("aliases", [])
+                        alias_str = f" (aliases: {', '.join(aliases)})" if aliases else ""
+                        print(f"  {name}{alias_str}")
+                else:
+                    print("  (no tools defined)")
+                found_any = True
+                break
         else:
-            print(f"  {art_type}: (not supported)")
+            if found_any:
+                print()
+            label = filter_vault_name or filter_vault_path
+            print(f"VAULT: {label}")
+            print("  (no tools defined)")
+            found_any = True
+    else:
+        # Show all vaults
+        for vault_name, vault_path, tools in all_vault_data:
+            if not tools:
+                continue
+            if found_any:
+                print()
+            default_marker = " (default)" if vault_path == default_vault_path else ""
+            label = vault_name or vault_path
+            print(f"VAULT: {label}{default_marker}")
+            for name in sorted(tools):
+                aliases = tools[name].get("aliases", [])
+                alias_str = f" (aliases: {', '.join(aliases)})" if aliases else ""
+                print(f"  {name}{alias_str}")
+            found_any = True
+
+    # CURRENT DIRECTORY section
+    if cwd_tools and filter_vault_path is None:
+        if found_any:
+            print()
+        print("CURRENT DIRECTORY (./vault.yaml)")
+        for name in sorted(cwd_tools):
+            aliases = cwd_tools[name].get("aliases", [])
+            alias_str = f" (aliases: {', '.join(aliases)})" if aliases else ""
+            print(f"  {name}{alias_str}")
+
+    return 0
+
+
+def _format_tool_definition(tool_def: dict) -> None:
+    """Print the artifact support details for a tool definition."""
+    aliases = tool_def.get("aliases", [])
+    if aliases:
+        print(f"    Aliases: {', '.join(aliases)}")
+    for art_type in ("skills", "commands", "agents"):
+        if art_type in tool_def:
+            repo_path = tool_def[art_type]
+            global_key = f"global_{art_type}"
+            global_path = tool_def.get(global_key, "")
+            print(f"    {art_type}: {repo_path}")
+            if global_path:
+                print(f"      global: {global_path}")
+
+
+def _tool_info_detail(
+    tool_name: str,
+    global_tools: dict[str, dict],
+    default_vault_tools: dict[str, dict],
+    default_vault_name: str | None,
+    default_vault_path: str | None,
+    all_vault_data: list[tuple[str | None, str, dict[str, dict]]],
+    cwd_tools: dict[str, dict],
+    global_filter: bool,
+    filter_vault_path: str | None,
+    filter_vault_name: str | None,
+) -> int:
+    """Display detail view for a single tool across all tiers."""
+    # Resolve alias first
+    resolved_name = resolve_tool_name(tool_name, extra_tools=global_tools, vault_tools=default_vault_tools)
+
+    # Determine which definition is active via three-tier resolution
+    active_source: str | None = None
+    if default_vault_tools and resolved_name in default_vault_tools:
+        active_source = "vault"
+    elif global_tools and resolved_name in global_tools:
+        active_source = "global"
+    elif resolved_name in BUILTIN_TOOLS:
+        active_source = "builtin"
+
+    found_any = False
+
+    # BUILT-IN
+    if not global_filter and filter_vault_path is None:
+        if resolved_name in BUILTIN_TOOLS:
+            marker = "ACTIVE" if active_source == "builtin" else "(overridden)"
+            symbol = "\u2713" if active_source == "builtin" else "\u25CB"
+            print(f"  {symbol} BUILT-IN {marker}")
+            _format_tool_definition(BUILTIN_TOOLS[resolved_name])
+            found_any = True
+
+    # GLOBAL CONFIG
+    if filter_vault_path is None or global_filter:
+        if resolved_name in global_tools:
+            marker = "ACTIVE" if active_source == "global" else "(overridden)"
+            symbol = "\u2713" if active_source == "global" else "\u25CB"
+            if found_any:
+                print()
+            print(f"  {symbol} GLOBAL CONFIG {marker}")
+            _format_tool_definition(global_tools[resolved_name])
+            found_any = True
+
+    if global_filter:
+        if not found_any:
+            print(f"No definition for '{resolved_name}' in global config.")
+        return 0 if found_any else 1
+
+    # Per-vault definitions
+    if filter_vault_path is not None:
+        for vault_name, vault_path, tools in all_vault_data:
+            if vault_path == filter_vault_path and resolved_name in tools:
+                is_default = vault_path == default_vault_path
+                if is_default:
+                    marker = "ACTIVE" if active_source == "vault" else "(overridden)"
+                    symbol = "\u2713" if active_source == "vault" else "\u25CB"
+                else:
+                    marker = "(not active)"
+                    symbol = "\u25CB"
+                if found_any:
+                    print()
+                label = vault_name or vault_path
+                default_tag = " (default)" if is_default else ""
+                print(f"  {symbol} VAULT: {label}{default_tag} {marker}")
+                _format_tool_definition(tools[resolved_name])
+                found_any = True
+                break
+    else:
+        for vault_name, vault_path, tools in all_vault_data:
+            if resolved_name in tools:
+                is_default = vault_path == default_vault_path
+                if is_default:
+                    marker = "ACTIVE" if active_source == "vault" else "(overridden)"
+                    symbol = "\u2713" if active_source == "vault" else "\u25CB"
+                else:
+                    marker = "(not active)"
+                    symbol = "\u25CB"
+                if found_any:
+                    print()
+                label = vault_name or vault_path
+                default_tag = " (default)" if is_default else ""
+                print(f"  {symbol} VAULT: {label}{default_tag} {marker}")
+                _format_tool_definition(tools[resolved_name])
+                found_any = True
+
+    # CWD
+    if filter_vault_path is None and not global_filter:
+        if resolved_name in cwd_tools:
+            if found_any:
+                print()
+            print(f"  \u25CB CURRENT DIRECTORY (./vault.yaml) (not active)")
+            _format_tool_definition(cwd_tools[resolved_name])
+            found_any = True
+
+    if not found_any:
+        print(f"Error: Unknown tool: {resolved_name}", file=sys.stderr)
+        return 1
 
     return 0
 
@@ -1059,8 +1320,8 @@ def main() -> int:
             return handle_tool_add(args)
         if args.tool_command == "rm":
             return handle_tool_rm(args)
-        if args.tool_command == "show":
-            return handle_tool_show(args)
+        if args.tool_command == "info":
+            return handle_tool_info(args)
 
     if args.command == "spelunk":
         return handle_spelunk(args)
