@@ -1,12 +1,11 @@
 ## Coding Agent Tool Support
 - [x] claude-code
 - [x] opencode
-- [ ] Cursor
-- [ ] Codex
-- [ ] gemini cli
-- [ ] amp
-- [ ] goose
-- [ ] ???
+- [x] Codex (built-in, skills only)
+- [x] Custom tool support via `art tool add` (Cursor, Gemini CLI, Amp, Goose, etc.)
+- [x] Per-artifact-type path configuration (partial artifact support)
+- [x] Three-tier tool resolution: built-in < global config < vault config
+- [x] `vault.yaml` for portable vault metadata and vault-scoped tool definitions
 
 ## User-friendliness
 - [ ] Add the option for a user to disable artifact(s) from being added to `.git/info/exclude`.

@@ -21,7 +21,7 @@ It takes inspiration from local-first note-taking applications like Obsidian and
 - **Artifact discovery**: Scan any project for existing artifacts with `art spelunk`
 - **Artifact collection**: Store discovered artifacts back into a vault with `art store`
 - **Import tracking**: `.art-cache/imported` records what was imported and from where
-- **Supported tools**: Claude Code, OpenCode (extensible for more)
+- **Supported tools**: Claude Code, OpenCode, Codex (extensible — add custom tools with `art tool add`)
 - **Automatic git exclusion**: Adds imported artifacts to `.git/info/exclude` to protect against accidental commits of project-specific skills & prompts
 
 
@@ -88,7 +88,7 @@ Vaults added without `--name` are automatically assigned names using the `llm-va
 ### Managing Tools
 
 ```sh
-# List supported tools and see current default (shows aliases too)
+# List supported tools — shows artifact support, source, and aliases
 art tool list
 
 # Set default tool (defaults to opencode)
@@ -96,6 +96,19 @@ art tool select claude-code
 
 # Aliases work anywhere a tool name is accepted
 art tool select claude  # resolves to claude-code
+
+# Show details for a specific tool
+art tool show codex
+
+# Add a custom tool (e.g., Cursor IDE)
+art tool add cursor --skills .cursor/skills --commands .cursor/commands \
+  --global-skills '$HOME/.cursor/skills' --alias cur
+
+# Add a tool scoped to a specific vault
+art tool add my-tool --skills .my-tool/skills --vault=team-vault
+
+# Remove a custom tool
+art tool rm cursor
 ```
 
 ### Importing Artifacts
@@ -209,6 +222,7 @@ You'll be presented with a numbered list of discovered artifacts and can select 
 
 ```
 vault/
+├── vault.yaml          # Optional: portable vault name and tool definitions
 ├── skills/
 │   └── skill-name/
 │       ├── SKILL.md
@@ -218,5 +232,7 @@ vault/
 └── commands/
     └── command-name.md
 ```
+
+The optional `vault.yaml` file stores a portable vault name and vault-scoped tool definitions. When present, its name takes precedence over the name stored in the global config. Tool definitions in `vault.yaml` travel with the vault when shared.
 
 Artifacts are copied (or symlinked with `--link`) to tool-specific directories in the target repo (e.g., `.claude/skills/`, `.opencode/agents/`) and automatically excluded from git tracking.

@@ -1,11 +1,9 @@
 """Tests for tool alias support."""
 
-from unittest import mock
-
 import pytest
 
 from artifactr.tools import (
-    TOOL_ALIASES,
+    BUILTIN_TOOLS,
     get_aliases_for_tool,
     get_tool,
     resolve_tool_name,
@@ -67,13 +65,12 @@ class TestGetAliasesForTool:
         assert aliases == []
 
 
-class TestToolAliasesMap:
-    """Tests for TOOL_ALIASES dict."""
+class TestBuiltinToolAliases:
+    """Tests for aliases defined in BUILTIN_TOOLS."""
 
-    def test_claude_alias_exists(self):
-        """Verify claude alias is defined."""
-        assert "claude" in TOOL_ALIASES
-        assert TOOL_ALIASES["claude"] == "claude-code"
+    def test_claude_alias_in_builtin(self):
+        """Verify claude alias is defined in built-in tools."""
+        assert "claude" in BUILTIN_TOOLS["claude-code"]["aliases"]
 
 
 if __name__ == "__main__":

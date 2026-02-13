@@ -14,7 +14,8 @@ from .tools import get_tool_config_dirs
 def discover_artifacts(target: Path) -> list[dict]:
     """Discover artifacts in a target directory.
 
-    Searches tool config directories for skills, agents, and commands.
+    Searches tool config directories for skills, agents, and commands,
+    respecting each tool's supported artifact types.
 
     Args:
         target: Path to the directory to probe.
@@ -25,52 +26,48 @@ def discover_artifacts(target: Path) -> list[dict]:
     artifacts = []
     tool_config_dirs = get_tool_config_dirs()
 
-    for tool_name, config_dir in tool_config_dirs.items():
-        config_path = target / config_dir
-        if not config_path.is_dir():
-            continue
+    for tool_name, type_paths in tool_config_dirs.items():
+        for artifact_type, repo_path in type_paths.items():
+            base_path = target / repo_path
 
-        # Check skills/ — subdirectories containing SKILL.md
-        skills_path = config_path / "skills"
-        if skills_path.is_dir():
-            for item in skills_path.iterdir():
-                if item.is_dir() and (item / "SKILL.md").is_file():
-                    artifacts.append({
-                        "name": item.name,
-                        "type": "skill",
-                        "type_plural": "skills",
-                        "path": item.resolve(),
-                        "tool": tool_name,
-                        "config_dir": config_dir,
-                    })
+            if not base_path.is_dir():
+                continue
 
-        # Check agents/ — .md files directly inside
-        agents_path = config_path / "agents"
-        if agents_path.is_dir():
-            for item in agents_path.iterdir():
-                if item.is_file() and item.suffix == ".md":
-                    artifacts.append({
-                        "name": item.stem,
-                        "type": "agent",
-                        "type_plural": "agents",
-                        "path": item.resolve(),
-                        "tool": tool_name,
-                        "config_dir": config_dir,
-                    })
+            if artifact_type == "skills":
+                for item in base_path.iterdir():
+                    if item.is_dir() and (item / "SKILL.md").is_file():
+                        artifacts.append({
+                            "name": item.name,
+                            "type": "skill",
+                            "type_plural": "skills",
+                            "path": item.resolve(),
+                            "tool": tool_name,
+                            "config_dir": repo_path,
+                        })
 
-        # Check commands/ — .md files directly inside
-        commands_path = config_path / "commands"
-        if commands_path.is_dir():
-            for item in commands_path.iterdir():
-                if item.is_file() and item.suffix == ".md":
-                    artifacts.append({
-                        "name": item.stem,
-                        "type": "command",
-                        "type_plural": "commands",
-                        "path": item.resolve(),
-                        "tool": tool_name,
-                        "config_dir": config_dir,
-                    })
+            elif artifact_type == "agents":
+                for item in base_path.iterdir():
+                    if item.is_file() and item.suffix == ".md":
+                        artifacts.append({
+                            "name": item.stem,
+                            "type": "agent",
+                            "type_plural": "agents",
+                            "path": item.resolve(),
+                            "tool": tool_name,
+                            "config_dir": repo_path,
+                        })
+
+            elif artifact_type == "commands":
+                for item in base_path.iterdir():
+                    if item.is_file() and item.suffix == ".md":
+                        artifacts.append({
+                            "name": item.stem,
+                            "type": "command",
+                            "type_plural": "commands",
+                            "path": item.resolve(),
+                            "tool": tool_name,
+                            "config_dir": repo_path,
+                        })
 
     artifacts.sort(key=lambda a: (a["tool"], a["type"], a["name"]))
     return artifacts

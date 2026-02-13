@@ -6,6 +6,7 @@ Program logic is decoupled from CLI invocations to allow for future GUI developm
 
 import argparse
 import sys
+from pathlib import Path
 from typing import Any
 
 from . import __version__
@@ -23,10 +24,23 @@ from .catalog import (
     select_default,
     select_default_tool,
 )
+from .config import (
+    load_global_tools,
+    load_vault_metadata,
+    save_global_tools,
+    save_vault_metadata,
+)
 from .creator import create_artifact, create_skill, resolve_edit_target, resolve_project_target, resolve_vault_target
 from .importer import copy_with_prompt, import_artifacts, import_artifacts_global
 from .scanner import discover_artifacts, extract_description, load_import_cache
-from .tools import get_aliases_for_tool, get_supported_tools, resolve_tool_name
+from .tools import (
+    BUILTIN_TOOLS,
+    get_aliases_for_tool,
+    get_supported_tools,
+    get_tool,
+    get_tool_source,
+    resolve_tool_name,
+)
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -53,7 +67,7 @@ def create_parser() -> argparse.ArgumentParser:
     )
     import_parser.add_argument(
         "--tools",
-        help=f"Comma-separated list of tools to import ({', '.join(get_supported_tools())})",
+        help="Comma-separated list of tools to import",
     )
     import_parser.add_argument(
         "--link",
@@ -128,17 +142,47 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     # tool command with subcommands
-    tool_parser = subparsers.add_parser("tool", help="Manage tool selection")
+    tool_parser = subparsers.add_parser("tool", help="Manage tools")
     tool_subparsers = tool_parser.add_subparsers(dest="tool_command")
 
     # tool select
     tool_select = tool_subparsers.add_parser("select", help="Set default tool")
-    tool_select.add_argument(
-        "name", help=f"Tool name ({', '.join(get_supported_tools())})"
-    )
+    tool_select.add_argument("name", help="Tool name")
 
     # tool list
     tool_subparsers.add_parser("list", help="List supported tools")
+
+    # tool add
+    tool_add = tool_subparsers.add_parser("add", help="Add a custom tool definition")
+    tool_add.add_argument("name", help="Tool identifier")
+    tool_add.add_argument("--skills", help="Repo-relative path for skills")
+    tool_add.add_argument("--commands", help="Repo-relative path for commands")
+    tool_add.add_argument("--agents", help="Repo-relative path for agents")
+    tool_add.add_argument("--global-skills", help="Absolute path for global skills")
+    tool_add.add_argument("--global-commands", help="Absolute path for global commands")
+    tool_add.add_argument("--global-agents", help="Absolute path for global agents")
+    tool_add.add_argument(
+        "--alias", action="append", default=[], dest="aliases",
+        help="Tool alias (repeatable)",
+    )
+    tool_add.add_argument("--vault", help="Store in vault's metadata instead of global config")
+    tool_add.add_argument(
+        "-g", "--global", action="store_true", dest="global_config",
+        help="Explicitly store in global config (default behavior)",
+    )
+
+    # tool rm
+    tool_rm = tool_subparsers.add_parser("rm", help="Remove a custom tool definition")
+    tool_rm.add_argument("name", help="Tool identifier to remove")
+    tool_rm.add_argument("--vault", help="Remove from vault's metadata instead of global config")
+    tool_rm.add_argument(
+        "-g", "--global", action="store_true", dest="global_config",
+        help="Explicitly remove from global config (default behavior)",
+    )
+
+    # tool show
+    tool_show = tool_subparsers.add_parser("show", help="Show a tool's configuration")
+    tool_show.add_argument("name", help="Tool identifier to display")
 
     # spelunk command
     spelunk_parser = subparsers.add_parser(
@@ -275,18 +319,12 @@ def create_parser() -> argparse.ArgumentParser:
 
 
 def handle_import(args: argparse.Namespace) -> int:
-    """Handle the import command.
+    """Handle the import command."""
+    from .tools import reload_registry
 
-    Args:
-        args: Parsed command-line arguments.
-
-    Returns:
-        Exit code (0 for success, 1 for error).
-    """
     global_import = getattr(args, "global_import", False)
     force = getattr(args, "force", False)
 
-    # Validate: need either --global or a target
     if not global_import and args.target is None:
         print(
             "Error: A target repository is required unless --global is used.\n"
@@ -295,42 +333,61 @@ def handle_import(args: argparse.Namespace) -> int:
         )
         return 1
 
-    # Parse tools if provided, otherwise use default tool
+    # Load vault tool definitions for three-tier resolution
+    global_tools = load_global_tools()
+    vault_tools: dict[str, dict] = {}
+    vault_identifier = getattr(args, "vault", None)
+    if vault_identifier:
+        vault_path = get_vault_by_name_or_path(vault_identifier)
+        if vault_path:
+            meta = load_vault_metadata(vault_path)
+            vault_tools = meta.get("tools", {})
+    else:
+        default_vault = get_default_vault()
+        if default_vault:
+            meta = load_vault_metadata(default_vault)
+            vault_tools = meta.get("tools", {})
+
+    # Reload registry with all tiers so import functions see custom tools
+    reload_registry(global_tools=global_tools, vault_tools=vault_tools)
+
     tools_list: list[str]
     if args.tools:
         tools_list = [t.strip() for t in args.tools.split(",")]
     else:
         tools_list = [get_default_tool()]
 
-    # Parse artifacts if provided
     artifacts_list = None
     if getattr(args, "artifacts", None):
         artifacts_list = [a.strip() for a in args.artifacts.split(",")]
 
-    if global_import:
-        result = import_artifacts_global(
-            vault=args.vault,
-            tools=tools_list,
-            link=args.link,
-            artifacts=artifacts_list,
-            force=force,
-        )
-    else:
-        result = import_artifacts(
-            target=args.target,
-            vault=args.vault,
-            tools=tools_list,
-            link=args.link,
-            artifacts=artifacts_list,
-            force=force,
-        )
+    try:
+        if global_import:
+            result = import_artifacts_global(
+                vault=args.vault,
+                tools=tools_list,
+                link=args.link,
+                artifacts=artifacts_list,
+                force=force,
+            )
+        else:
+            result = import_artifacts(
+                target=args.target,
+                vault=args.vault,
+                tools=tools_list,
+                link=args.link,
+                artifacts=artifacts_list,
+                force=force,
+            )
+    finally:
+        # Reset registry back to defaults
+        reload_registry()
 
     if not result["success"]:
         for error in result["errors"]:
             print(error, file=sys.stderr)
         return 1
 
-    # Print success summary
     print_import_summary(result)
     return 0
 
@@ -360,14 +417,7 @@ def print_import_summary(result: dict[str, Any]) -> None:
 
 
 def handle_vault_add(args: argparse.Namespace) -> int:
-    """Handle the vault add command.
-
-    Args:
-        args: Parsed command-line arguments.
-
-    Returns:
-        Exit code (0 for success, 1 for error).
-    """
+    """Handle the vault add command."""
     name = getattr(args, "name", None)
     set_default = getattr(args, "set_default", False)
 
@@ -378,13 +428,11 @@ def handle_vault_add(args: argparse.Namespace) -> int:
     result = add_vaults(args.paths, name=name)
     assigned_names = result.get("names", {})
 
-    # Print results
     for path in result["added"]:
         vault_name = assigned_names.get(path, name)
         if vault_name:
             print(f"Added vault: {vault_name} ({path})")
             if not name:
-                # Auto-named — show rename hint
                 print(f"  To rename this vault: art vault name {vault_name} <new-name>")
         else:
             print(f"Added vault: {path}")
@@ -395,13 +443,11 @@ def handle_vault_add(args: argparse.Namespace) -> int:
     for error in result["errors"]:
         print(error, file=sys.stderr)
 
-    # If the first vault was added, it becomes the default
     if result["added"]:
         info = list_vaults()
         if info["default"] and info["default"] in result["added"]:
             print(f"Set as default vault: {info['default']}")
 
-    # Handle --set-default
     if set_default and result["added"]:
         select_default(result["added"][0])
         print(f"Set as default vault: {result['added'][0]}")
@@ -410,14 +456,7 @@ def handle_vault_add(args: argparse.Namespace) -> int:
 
 
 def handle_vault_init(args: argparse.Namespace) -> int:
-    """Handle the vault init command.
-
-    Args:
-        args: Parsed command-line arguments.
-
-    Returns:
-        Exit code (0 for success, 1 for error).
-    """
+    """Handle the vault init command."""
     name = getattr(args, "name", None)
     set_default = getattr(args, "set_default", False)
 
@@ -436,6 +475,10 @@ def handle_vault_init(args: argparse.Namespace) -> int:
         print(f"{action} vault: {vault_name} ({path})")
         print(f"  To rename this vault: art vault name {vault_name} <new-name>")
 
+        # Write vault name to vault.yaml if --name was provided
+        if name and result.get("created"):
+            save_vault_metadata(path, {"name": name})
+
         if set_default:
             select_default(path)
             print(f"Set as default vault: {path}")
@@ -446,14 +489,7 @@ def handle_vault_init(args: argparse.Namespace) -> int:
 
 
 def handle_vault_rm(args: argparse.Namespace) -> int:
-    """Handle the vault rm command.
-
-    Args:
-        args: Parsed command-line arguments.
-
-    Returns:
-        Exit code (0 for success).
-    """
+    """Handle the vault rm command."""
     result = remove_vaults(args.paths)
 
     for path in result["removed"]:
@@ -466,14 +502,7 @@ def handle_vault_rm(args: argparse.Namespace) -> int:
 
 
 def handle_vault_select(args: argparse.Namespace) -> int:
-    """Handle the vault select command.
-
-    Args:
-        args: Parsed command-line arguments.
-
-    Returns:
-        Exit code (0 for success, 1 for error).
-    """
+    """Handle the vault select command."""
     if select_default(args.path):
         print(f"Default vault set to: {args.path}")
         return 0
@@ -483,14 +512,7 @@ def handle_vault_select(args: argparse.Namespace) -> int:
 
 
 def handle_vault_list(args: argparse.Namespace) -> int:
-    """Handle the vault list command.
-
-    Args:
-        args: Parsed command-line arguments.
-
-    Returns:
-        Exit code (0 for success).
-    """
+    """Handle the vault list command."""
     info = list_vaults()
 
     if not info["vaults"]:
@@ -500,9 +522,16 @@ def handle_vault_list(args: argparse.Namespace) -> int:
     vault_names = info["vault_names"]
     show_all = getattr(args, "show_all", False)
 
+    # Check vault.yaml for names (precedence over config vault_names)
+    effective_names = dict(vault_names)
+    for vault_path in info["vaults"]:
+        meta = load_vault_metadata(vault_path)
+        if meta.get("name"):
+            effective_names[vault_path] = meta["name"]
+
     print("Registered vaults:")
     for vault_path in info["vaults"]:
-        name = vault_names.get(vault_path)
+        name = effective_names.get(vault_path)
         default_marker = " (default)" if vault_path == info["default"] else ""
         prefix = "  * " if vault_path == info["default"] else "    "
 
@@ -533,14 +562,7 @@ def handle_vault_list(args: argparse.Namespace) -> int:
 
 
 def handle_vault_name(args: argparse.Namespace) -> int:
-    """Handle the vault name command.
-
-    Args:
-        args: Parsed command-line arguments.
-
-    Returns:
-        Exit code (0 for success, 1 for error).
-    """
+    """Handle the vault name command."""
     result = name_vault(args.vault, args.name)
 
     if result["success"]:
@@ -552,15 +574,9 @@ def handle_vault_name(args: argparse.Namespace) -> int:
 
 
 def handle_tool_select(args: argparse.Namespace) -> int:
-    """Handle the tool select command.
-
-    Args:
-        args: Parsed command-line arguments.
-
-    Returns:
-        Exit code (0 for success, 1 for error).
-    """
-    supported_tools = get_supported_tools()
+    """Handle the tool select command."""
+    global_tools = load_global_tools()
+    supported_tools = get_supported_tools(global_tools=global_tools)
     if select_default_tool(args.name, supported_tools):
         print(f"Default tool set to: {args.name}")
         return 0
@@ -574,42 +590,188 @@ def handle_tool_select(args: argparse.Namespace) -> int:
 
 
 def handle_tool_list(args: argparse.Namespace) -> int:
-    """Handle the tool list command.
-
-    Args:
-        args: Parsed command-line arguments (unused).
-
-    Returns:
-        Exit code (0 for success).
-    """
-    _ = args  # unused
-    supported_tools = get_supported_tools()
+    """Handle the tool list command."""
+    _ = args
+    global_tools = load_global_tools()
+    supported_tools = get_supported_tools(global_tools=global_tools)
     info = list_tools_info(supported_tools)
 
-    print("Supported tools:")
+    # Build table rows
+    rows = []
     for tool_name in info["tools"]:
-        aliases = get_aliases_for_tool(tool_name)
-        alias_str = f" (alias: {', '.join(aliases)})" if aliases else ""
-        if tool_name == info["default"]:
-            print(f"  * {tool_name}{alias_str} (default)")
+        adapter = get_tool(tool_name, global_tools=global_tools)
+        if adapter is None:
+            continue
+
+        source = get_tool_source(tool_name, global_tools=global_tools)
+        skills_col = "yes" if "skills" in adapter.supported_types else "-"
+        commands_col = "yes" if "commands" in adapter.supported_types else "-"
+        agents_col = "yes" if "agents" in adapter.supported_types else "-"
+        aliases = get_aliases_for_tool(tool_name, extra_tools=global_tools)
+        alias_col = ", ".join(aliases) if aliases else "-"
+
+        default_marker = " *" if tool_name == info["default"] else ""
+        rows.append((tool_name + default_marker, source, skills_col, commands_col, agents_col, alias_col))
+
+    headers = ("NAME", "SOURCE", "SKILLS", "COMMANDS", "AGENTS", "ALIASES")
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for i, val in enumerate(row):
+            widths[i] = max(widths[i], len(val))
+
+    fmt = "  ".join(f"{{:<{w}}}" for w in widths)
+    print(fmt.format(*headers))
+    for row in rows:
+        print(fmt.format(*row))
+
+    return 0
+
+
+def handle_tool_add(args: argparse.Namespace) -> int:
+    """Handle the tool add command."""
+    tool_name = args.name
+
+    # Build tool definition from flags
+    tool_def: dict[str, Any] = {}
+    if args.skills:
+        tool_def["skills"] = args.skills
+    if args.commands:
+        tool_def["commands"] = args.commands
+    if args.agents:
+        tool_def["agents"] = args.agents
+    if getattr(args, "global_skills", None):
+        tool_def["global_skills"] = args.global_skills
+    if getattr(args, "global_commands", None):
+        tool_def["global_commands"] = args.global_commands
+    if getattr(args, "global_agents", None):
+        tool_def["global_agents"] = args.global_agents
+    if args.aliases:
+        tool_def["aliases"] = args.aliases
+
+    # Validate at least one artifact path provided
+    if not any(k in tool_def for k in ("skills", "commands", "agents")):
+        print(
+            "Error: At least one of --skills, --commands, or --agents is required.",
+            file=sys.stderr,
+        )
+        return 1
+
+    vault_identifier = getattr(args, "vault", None)
+
+    if vault_identifier:
+        # Store in vault's vault.yaml
+        vault_path = get_vault_by_name_or_path(vault_identifier)
+        if vault_path is None:
+            print(f"Error: Vault not found: {vault_identifier}", file=sys.stderr)
+            return 1
+
+        meta = load_vault_metadata(vault_path)
+        if tool_name in meta.get("tools", {}):
+            print(f"Error: Tool '{tool_name}' already exists in vault.", file=sys.stderr)
+            return 1
+
+        if "tools" not in meta or meta["tools"] is None:
+            meta["tools"] = {}
+        meta["tools"][tool_name] = tool_def
+        save_vault_metadata(vault_path, meta)
+        print(f"Added tool '{tool_name}' to vault.")
+    else:
+        # Store in global config
+        global_tools = load_global_tools()
+        if tool_name in global_tools:
+            print(f"Error: Tool '{tool_name}' already exists in global config.", file=sys.stderr)
+            return 1
+
+        global_tools[tool_name] = tool_def
+        save_global_tools(global_tools)
+        print(f"Added tool '{tool_name}' to global config.")
+
+    return 0
+
+
+def handle_tool_rm(args: argparse.Namespace) -> int:
+    """Handle the tool rm command."""
+    tool_name = args.name
+    vault_identifier = getattr(args, "vault", None)
+
+    if vault_identifier:
+        # Remove from vault's vault.yaml
+        vault_path = get_vault_by_name_or_path(vault_identifier)
+        if vault_path is None:
+            print(f"Error: Vault not found: {vault_identifier}", file=sys.stderr)
+            return 1
+
+        meta = load_vault_metadata(vault_path)
+        vault_tools = meta.get("tools", {})
+        if tool_name not in vault_tools:
+            print(f"Error: Tool '{tool_name}' not found in vault.", file=sys.stderr)
+            return 1
+
+        del vault_tools[tool_name]
+        meta["tools"] = vault_tools
+        save_vault_metadata(vault_path, meta)
+        print(f"Removed tool '{tool_name}' from vault.")
+    else:
+        # Remove from global config
+        global_tools = load_global_tools()
+        if tool_name not in global_tools:
+            # Check if it's a built-in only
+            if tool_name in BUILTIN_TOOLS:
+                print(
+                    f"Error: Cannot remove built-in tool '{tool_name}'. "
+                    f"Built-in tool definitions cannot be removed.",
+                    file=sys.stderr,
+                )
+            else:
+                print(f"Error: Tool '{tool_name}' not found in global config.", file=sys.stderr)
+            return 1
+
+        del global_tools[tool_name]
+        save_global_tools(global_tools)
+        print(f"Removed tool '{tool_name}' from global config.")
+
+    return 0
+
+
+def handle_tool_show(args: argparse.Namespace) -> int:
+    """Handle the tool show command."""
+    tool_name = args.name
+    global_tools = load_global_tools()
+    adapter = get_tool(tool_name, global_tools=global_tools)
+
+    if adapter is None:
+        print(f"Error: Unknown tool: {tool_name}", file=sys.stderr)
+        return 1
+
+    # Resolve alias if needed
+    resolved_name = resolve_tool_name(tool_name, extra_tools=global_tools)
+
+    source = get_tool_source(resolved_name, global_tools=global_tools)
+    aliases = get_aliases_for_tool(resolved_name, extra_tools=global_tools)
+
+    print(f"Tool: {resolved_name}")
+    print(f"Source: {source}")
+    if aliases:
+        print(f"Aliases: {', '.join(aliases)}")
+
+    print("\nArtifact support:")
+    for art_type in ("skills", "commands", "agents"):
+        if art_type in adapter.supported_types:
+            repo_path = adapter._config.get(art_type, "")
+            global_key = f"global_{art_type}"
+            global_path = adapter._config.get(global_key, "")
+            print(f"  {art_type}:")
+            print(f"    repo-local: {repo_path}")
+            if global_path:
+                print(f"    global:     {global_path}")
         else:
-            print(f"    {tool_name}{alias_str}")
+            print(f"  {art_type}: (not supported)")
 
     return 0
 
 
 def parse_selection(selection: str, max_val: int) -> list[int]:
-    """Parse a user selection string into a list of 0-based indices.
-
-    Supports: individual numbers, comma-separated, ranges, "all", and combinations.
-
-    Args:
-        selection: User input string (e.g., "1,3-5,7" or "all").
-        max_val: Maximum valid value (1-based).
-
-    Returns:
-        Sorted list of unique 0-based indices.
-    """
+    """Parse a user selection string into a list of 0-based indices."""
     selection = selection.strip().lower()
     if selection == "all":
         return list(range(max_val))
@@ -639,16 +801,7 @@ def parse_selection(selection: str, max_val: int) -> list[int]:
 
 
 def handle_spelunk(args: argparse.Namespace) -> int:
-    """Handle the spelunk command.
-
-    Args:
-        args: Parsed command-line arguments.
-
-    Returns:
-        Exit code (0 for success, 1 for error).
-    """
-    from pathlib import Path
-
+    """Handle the spelunk command."""
     target = Path(args.target).resolve()
 
     if not target.exists() or not target.is_dir():
@@ -661,31 +814,26 @@ def handle_spelunk(args: argparse.Namespace) -> int:
         print(f"No artifacts found in {args.target}")
         return 0
 
-    # Load import cache
     import_cache = load_import_cache(target)
 
-    # Build table rows
     rows = []
     for art in artifacts:
         name_col = art["name"]
 
-        # Check import cache
         if art["name"] in import_cache:
             vault_names = ", ".join(import_cache[art["name"]])
             name_col += f" (imported: {vault_names})"
 
         description = extract_description(art)
-        tool_label = art["config_dir"].lstrip(".")
+        tool_label = art["tool"]
         rows.append((name_col, art["type"], tool_label, description))
 
-    # Calculate column widths
     headers = ("NAME", "TYPE", "TOOL", "DESCRIPTION")
     widths = [len(h) for h in headers]
     for row in rows:
         for i, val in enumerate(row):
             widths[i] = max(widths[i], len(val))
 
-    # Print table
     fmt = "  ".join(f"{{:<{w}}}" for w in widths)
     print(fmt.format(*headers))
     for row in rows:
@@ -695,23 +843,13 @@ def handle_spelunk(args: argparse.Namespace) -> int:
 
 
 def handle_store(args: argparse.Namespace) -> int:
-    """Handle the store command.
-
-    Args:
-        args: Parsed command-line arguments.
-
-    Returns:
-        Exit code (0 for success, 1 for error).
-    """
-    from pathlib import Path
-
+    """Handle the store command."""
     target = Path(args.target_dir).resolve()
 
     if not target.exists() or not target.is_dir():
         print(f"Error: Target directory does not exist: {args.target_dir}", file=sys.stderr)
         return 1
 
-    # Resolve vault
     vault_identifier = getattr(args, "vault", None)
     if vault_identifier:
         vault_path_str = get_vault_by_name_or_path(vault_identifier)
@@ -726,24 +864,20 @@ def handle_store(args: argparse.Namespace) -> int:
 
     vault_path = Path(vault_path_str)
 
-    # Get vault display name
     vault_info = list_vaults()
     vault_display_name = vault_info["vault_names"].get(vault_path_str, vault_path.name)
 
-    # Discover artifacts
     artifacts = discover_artifacts(target)
 
     if not artifacts:
         print(f"No artifacts found in {args.target_dir}")
         return 0
 
-    # Display numbered list
     print(f"Discovered artifacts in {target}:")
     for i, art in enumerate(artifacts, 1):
         rel_path = art["path"].relative_to(target)
         print(f"  {i}. {art['name']} ({art['type']}) - {rel_path}")
 
-    # Prompt for selection
     try:
         selection = input(f"\nSelect artifacts to store [1-{len(artifacts)}, all]: ")
     except EOFError:
@@ -767,14 +901,7 @@ def handle_store(args: argparse.Namespace) -> int:
 
 
 def handle_edit(args: argparse.Namespace) -> int:
-    """Handle the edit command.
-
-    Args:
-        args: Parsed command-line arguments.
-
-    Returns:
-        Exit code (0 for success, 1 for error).
-    """
+    """Handle the edit command."""
     import subprocess
 
     from .utils import get_editor
@@ -814,25 +941,14 @@ def handle_edit(args: argparse.Namespace) -> int:
 
 
 def handle_create_artifact(args: argparse.Namespace, artifact_type: str) -> int:
-    """Handle create skill/command/agent commands.
-
-    Requires at least --description. All creation is flag-based (non-interactive).
-
-    Args:
-        args: Parsed command-line arguments.
-        artifact_type: One of "skill", "command", "agent".
-
-    Returns:
-        Exit code (0 for success, 1 for error).
-    """
-    # Get the artifact name from the type-specific positional
+    """Handle create skill/command/agent commands."""
     if artifact_type == "skill":
         artifact_name = args.skill_name
         display_name = getattr(args, "display_name", None) or artifact_name
     elif artifact_type == "command":
         artifact_name = args.command_name
         display_name = artifact_name
-    else:  # agent
+    else:
         artifact_name = args.agent_name
         display_name = artifact_name
 
@@ -851,7 +967,6 @@ def handle_create_artifact(args: argparse.Namespace, artifact_type: str) -> int:
         )
         return 1
 
-    # Parse -D key=value flags into dict
     extra_fields = {}
     for field_str in field_flags:
         if "=" not in field_str:
@@ -860,7 +975,6 @@ def handle_create_artifact(args: argparse.Namespace, artifact_type: str) -> int:
         key, value = field_str.split("=", 1)
         extra_fields[key] = value
 
-    # Resolve targets
     if here:
         tools_list = None
         if tools_str:
@@ -880,7 +994,6 @@ def handle_create_artifact(args: argparse.Namespace, artifact_type: str) -> int:
 
         targets = [resolution["path"]]
 
-    # Create artifact at each target
     for target_path in targets:
         result = create_artifact(
             artifact_type=artifact_type,
@@ -904,11 +1017,7 @@ def handle_create_skill(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    """Main entry point for the CLI.
-
-    Returns:
-        Exit code (0 for success, non-zero for error).
-    """
+    """Main entry point for the CLI."""
     parser = create_parser()
     args = parser.parse_args()
 
@@ -921,7 +1030,6 @@ def main() -> int:
 
     if args.command == "vault":
         if args.vault_command is None:
-            # Print vault subcommand help
             parser.parse_args(["vault", "--help"])
             return 0
 
@@ -940,7 +1048,6 @@ def main() -> int:
 
     if args.command == "tool":
         if args.tool_command is None:
-            # Print tool subcommand help
             parser.parse_args(["tool", "--help"])
             return 0
 
@@ -948,6 +1055,12 @@ def main() -> int:
             return handle_tool_select(args)
         if args.tool_command == "list":
             return handle_tool_list(args)
+        if args.tool_command == "add":
+            return handle_tool_add(args)
+        if args.tool_command == "rm":
+            return handle_tool_rm(args)
+        if args.tool_command == "show":
+            return handle_tool_show(args)
 
     if args.command == "spelunk":
         return handle_spelunk(args)

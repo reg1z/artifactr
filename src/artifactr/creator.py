@@ -215,10 +215,17 @@ def resolve_project_target(
                 "paths": [],
                 "error": f"Unknown tool: {tool_name}",
             }
+        if subdir not in adapter.supported_types:
+            return {
+                "success": False,
+                "paths": [],
+                "error": f"Tool '{tool_name}' does not support {artifact_type}s",
+            }
+        dest = adapter.get_destination(subdir, Path.cwd())
         if artifact_type in _DIRECTORY_TYPES:
-            target = Path.cwd() / adapter.config_dir / subdir / artifact_name
+            target = dest / artifact_name
         else:
-            target = Path.cwd() / adapter.config_dir / subdir / f"{artifact_name}.md"
+            target = dest / f"{artifact_name}.md"
         paths.append(target)
 
     return {"success": True, "paths": paths, "error": None}
@@ -261,10 +268,14 @@ def resolve_edit_target(
             if adapter is None:
                 return {"success": False, "path": None, "error": f"Unknown tool: {tool_name}"}
 
+            if subdir not in adapter.supported_types:
+                continue
+
+            dest = adapter.get_destination(subdir, Path.cwd())
             if artifact_type in _DIRECTORY_TYPES:
-                target = Path.cwd() / adapter.config_dir / subdir / artifact_name / "SKILL.md"
+                target = dest / artifact_name / "SKILL.md"
             else:
-                target = Path.cwd() / adapter.config_dir / subdir / f"{artifact_name}.md"
+                target = dest / f"{artifact_name}.md"
 
             if target.exists():
                 return {"success": True, "path": target, "error": None}

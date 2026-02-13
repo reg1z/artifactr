@@ -120,7 +120,8 @@ class TestResolveEditTarget:
         mock_default_tool.return_value = "claude-code"
 
         mock_adapter = mock.MagicMock()
-        mock_adapter.config_dir = ".claude"
+        mock_adapter.supported_types = ["skills", "commands", "agents"]
+        mock_adapter.get_destination.return_value = tmp_path / ".claude" / "skills"
         mock_get_tool.return_value = mock_adapter
 
         # Create the artifact
@@ -140,7 +141,8 @@ class TestResolveEditTarget:
         mock_default_tool.return_value = "claude-code"
 
         mock_adapter = mock.MagicMock()
-        mock_adapter.config_dir = ".claude"
+        mock_adapter.supported_types = ["skills", "commands", "agents"]
+        mock_adapter.get_destination.return_value = tmp_path / ".claude" / "skills"
         mock_get_tool.return_value = mock_adapter
 
         result = resolve_edit_target("skill", "nonexistent", here=True)

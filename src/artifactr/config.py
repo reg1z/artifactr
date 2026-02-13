@@ -9,11 +9,7 @@ from .utils import get_config_dir
 
 
 def get_config_path() -> Path:
-    """Return the path to the configuration file.
-
-    Returns:
-        Path to config.yaml within the platform-specific config directory.
-    """
+    """Return the path to the configuration file."""
     return get_config_dir() / "config.yaml"
 
 
@@ -24,22 +20,32 @@ def load_config() -> dict[str, Any]:
     """Load the configuration from disk.
 
     Returns:
-        Configuration dictionary with 'vaults' list, 'default_vault', and 'default_tool' keys.
-        If the config file doesn't exist, returns a default empty config.
+        Configuration dictionary with 'vaults', 'default_vault', 'default_tool',
+        'vault_names', and 'tools' keys.
     """
     config_path = get_config_path()
 
     if not config_path.exists():
-        return {"vaults": [], "default_vault": None, "default_tool": DEFAULT_TOOL, "vault_names": {}}
+        return {
+            "vaults": [],
+            "default_vault": None,
+            "default_tool": DEFAULT_TOOL,
+            "vault_names": {},
+            "tools": {},
+        }
 
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
-    # Handle empty file or invalid YAML
     if config is None:
-        return {"vaults": [], "default_vault": None, "default_tool": DEFAULT_TOOL, "vault_names": {}}
+        return {
+            "vaults": [],
+            "default_vault": None,
+            "default_tool": DEFAULT_TOOL,
+            "vault_names": {},
+            "tools": {},
+        }
 
-    # Ensure required keys exist with proper defaults
     if "vaults" not in config:
         config["vaults"] = []
     if "default_vault" not in config:
@@ -48,22 +54,69 @@ def load_config() -> dict[str, Any]:
         config["default_tool"] = DEFAULT_TOOL
     if "vault_names" not in config:
         config["vault_names"] = {}
+    if "tools" not in config:
+        config["tools"] = {}
 
     return config
 
 
 def save_config(config: dict[str, Any]) -> None:
-    """Save the configuration to disk.
-
-    Creates parent directories if they don't exist.
-
-    Args:
-        config: Configuration dictionary to save.
-    """
+    """Save the configuration to disk."""
     config_path = get_config_path()
-
-    # Create parent directories if needed
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(config_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(config, f, default_flow_style=False, allow_unicode=True)
+
+
+def load_global_tools() -> dict[str, dict]:
+    """Load user-defined tools from the global config file.
+
+    Returns:
+        Dict of tool name -> tool definition from the 'tools' section.
+    """
+    config = load_config()
+    return config.get("tools", {})
+
+
+def save_global_tools(tools: dict[str, dict]) -> None:
+    """Save user-defined tools to the global config file."""
+    config = load_config()
+    config["tools"] = tools
+    save_config(config)
+
+
+def load_vault_metadata(vault_path: str | Path) -> dict[str, Any]:
+    """Read vault.yaml from a vault directory.
+
+    Returns dict with 'name' and 'tools' keys (empty defaults if file missing).
+    """
+    meta_path = Path(vault_path) / "vault.yaml"
+    if not meta_path.exists():
+        return {"name": None, "tools": {}}
+
+    with open(meta_path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+
+    if data is None:
+        return {"name": None, "tools": {}}
+
+    return {
+        "name": data.get("name"),
+        "tools": data.get("tools", {}),
+    }
+
+
+def save_vault_metadata(vault_path: str | Path, metadata: dict[str, Any]) -> None:
+    """Write vault.yaml to a vault directory."""
+    meta_path = Path(vault_path) / "vault.yaml"
+
+    # Build output dict, omitting None name
+    output: dict[str, Any] = {}
+    if metadata.get("name") is not None:
+        output["name"] = metadata["name"]
+    if metadata.get("tools"):
+        output["tools"] = metadata["tools"]
+
+    with open(meta_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(output, f, default_flow_style=False, allow_unicode=True)

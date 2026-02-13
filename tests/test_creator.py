@@ -174,9 +174,11 @@ class TestResolveProjectTarget:
         mock_supported.return_value = ["claude-code", "opencode"]
 
         mock_claude = mock.MagicMock()
-        mock_claude.config_dir = ".claude"
+        mock_claude.supported_types = ["skills", "commands", "agents"]
+        mock_claude.get_destination.return_value = Path.cwd() / ".claude" / "skills"
         mock_open = mock.MagicMock()
-        mock_open.config_dir = ".opencode"
+        mock_open.supported_types = ["skills", "commands", "agents"]
+        mock_open.get_destination.return_value = Path.cwd() / ".opencode" / "skills"
 
         def get_tool_side_effect(name):
             return {"claude-code": mock_claude, "opencode": mock_open}.get(name)
@@ -192,7 +194,8 @@ class TestResolveProjectTarget:
     def test_explicit_tools(self, mock_get_tool):
         """Verify only specified tools are used."""
         mock_claude = mock.MagicMock()
-        mock_claude.config_dir = ".claude"
+        mock_claude.supported_types = ["skills", "commands", "agents"]
+        mock_claude.get_destination.return_value = Path.cwd() / ".claude" / "skills"
         mock_get_tool.return_value = mock_claude
 
         result = resolve_project_target("my-skill", tools=["claude-code"])

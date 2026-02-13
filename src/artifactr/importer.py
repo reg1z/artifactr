@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .catalog import get_default_vault, get_vault_by_name_or_path, list_vaults
-from .tools import ARTIFACT_TYPES, get_source, get_supported_tools, get_tool, resolve_tool_name
+from .tools import get_source, get_supported_tools, get_tool, resolve_tool_name
 from .utils import is_git_repo
 
 
@@ -351,13 +351,18 @@ def import_artifacts(
         imported[tool_name] = {}
         imported_artifact_names: list[str] = []
 
+        supported = tool_adapter.supported_types
+
         if resolved_artifacts is not None:
             # Selective import — only the resolved artifacts
-            for artifact_type in ARTIFACT_TYPES:
+            for artifact_type in supported:
                 imported[tool_name][artifact_type] = 0
 
             for art in resolved_artifacts:
                 artifact_type = art["type"]
+                # Skip unsupported artifact types silently
+                if artifact_type not in supported:
+                    continue
                 source = art["source"]
                 dest_path = tool_adapter.get_destination(artifact_type, target_path)
                 item_dest = dest_path / source.name
@@ -373,8 +378,8 @@ def import_artifacts(
                 rel_dest = item_dest.relative_to(target_path)
                 exclude_patterns.append(str(rel_dest))
         else:
-            # Full import — all artifacts from vault
-            for artifact_type in ARTIFACT_TYPES:
+            # Full import — only supported artifact types
+            for artifact_type in supported:
                 source_path = get_source(artifact_type, vault_path)
 
                 # Skip if source doesn't exist or is empty
@@ -570,13 +575,18 @@ def import_artifacts_global(
         imported[tool_name] = {}
         imported_artifact_names: list[str] = []
 
+        supported = tool_adapter.supported_types
+
         if resolved_artifacts is not None:
             # Selective import — only the resolved artifacts
-            for artifact_type in ARTIFACT_TYPES:
+            for artifact_type in supported:
                 imported[tool_name][artifact_type] = 0
 
             for art in resolved_artifacts:
                 artifact_type = art["type"]
+                # Skip unsupported artifact types silently
+                if artifact_type not in supported:
+                    continue
                 source = art["source"]
                 dest_path = tool_adapter.get_global_destination(artifact_type)
 
@@ -595,8 +605,8 @@ def import_artifacts_global(
                 if result["copied"] > 0:
                     imported_artifact_names.append(art["name"])
         else:
-            # Full import — all artifacts from vault
-            for artifact_type in ARTIFACT_TYPES:
+            # Full import — only supported artifact types
+            for artifact_type in supported:
                 source_path = get_source(artifact_type, vault_path)
 
                 # Skip if source doesn't exist or is empty
