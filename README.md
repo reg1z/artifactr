@@ -21,7 +21,6 @@ It takes inspiration from local-first note-taking applications like Obsidian and
 - **Artifact discovery**: Scan any project for existing artifacts with `art spelunk`
 - **Artifact collection**: Store discovered artifacts back into a vault with `art store`
 - **Import tracking**: `.art-cache/imported` records what was imported and from where
-- **Tool aliases**: Use `claude` as shorthand for `claude-code` anywhere a tool name is accepted
 - **Supported tools**: Claude Code, OpenCode (extensible for more)
 - **Automatic git exclusion**: Adds imported artifacts to `.git/info/exclude` to protect against accidental commits of project-specific skills & prompts
 
