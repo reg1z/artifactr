@@ -206,7 +206,7 @@ def create_parser() -> argparse.ArgumentParser:
     vault_select.add_argument("path", help="Vault name or path to set as default")
 
     # vault ls
-    vault_list = vault_subparsers.add_parser("ls", help="List all vaults")
+    vault_list = vault_subparsers.add_parser("ls", aliases=["list"], help="List all vaults")
     vault_list.add_argument(
         "-a", "--all", action="store_true", dest="show_all",
         help="Show full vault hierarchy with artifacts",
@@ -221,7 +221,7 @@ def create_parser() -> argparse.ArgumentParser:
     tool_select.add_argument("name", help="Tool name")
 
     # tool ls
-    tool_list = tool_subparsers.add_parser("ls", help="List supported tools")
+    tool_list = tool_subparsers.add_parser("ls", aliases=["list"], help="List supported tools")
     tool_list.add_argument("--vault", help="Use tools from this vault instead of the default vault")
 
     # tool add
@@ -266,7 +266,7 @@ def create_parser() -> argparse.ArgumentParser:
 
     # ls command (vault-side)
     list_parser = subparsers.add_parser(
-        "ls", help="List artifacts in a vault"
+        "ls", aliases=["list"], help="List artifacts in a vault"
     )
     list_parser.add_argument(
         "--vault", help="Vault to list from (default: default vault)"
@@ -374,7 +374,7 @@ def create_parser() -> argparse.ArgumentParser:
 
     # proj ls
     proj_list = proj_subparsers.add_parser(
-        "ls", help="Show imported artifacts in a project"
+        "ls", aliases=["list"], help="Show imported artifacts in a project"
     )
     proj_list.add_argument(
         "--target", default=None, help="Project path (default: cwd)",
@@ -442,7 +442,7 @@ def create_parser() -> argparse.ArgumentParser:
 
     # conf ls
     conf_list = conf_subparsers.add_parser(
-        "ls", help="Show globally imported artifacts"
+        "ls", aliases=["list"], help="Show globally imported artifacts"
     )
     conf_list.add_argument(
         "--tools", help="Comma-separated tool filter",
@@ -2423,7 +2423,7 @@ def main() -> int:
         parser.print_help()
         return 0
 
-    if args.command == "ls":
+    if args.command in ("ls", "list"):
         return handle_list(args)
 
     if args.command == "rm":
@@ -2440,7 +2440,7 @@ def main() -> int:
             return handle_proj_rm(args)
         if proj_cmd == "wipe":
             return handle_proj_wipe(args)
-        if proj_cmd == "ls":
+        if proj_cmd in ("ls", "list"):
             return handle_proj_list(args)
 
     if args.command in ("config", "conf", "c"):
@@ -2454,7 +2454,7 @@ def main() -> int:
             return handle_conf_rm(args)
         if conf_cmd == "wipe":
             return handle_conf_wipe(args)
-        if conf_cmd == "ls":
+        if conf_cmd in ("ls", "list"):
             return handle_conf_list(args)
         if conf_cmd == "edit":
             return handle_config_edit(args)
@@ -2474,7 +2474,7 @@ def main() -> int:
             return handle_vault_name(args)
         if args.vault_command == "select":
             return handle_vault_select(args)
-        if args.vault_command == "ls":
+        if args.vault_command in ("ls", "list"):
             return handle_vault_list(args)
 
     if args.command in ("tool", "t"):
@@ -2484,7 +2484,7 @@ def main() -> int:
 
         if args.tool_command == "select":
             return handle_tool_select(args)
-        if args.tool_command == "ls":
+        if args.tool_command in ("ls", "list"):
             return handle_tool_list(args)
         if args.tool_command == "add":
             return handle_tool_add(args)
