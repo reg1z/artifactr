@@ -116,11 +116,47 @@ def resolve_type_filters(args: argparse.Namespace) -> dict[str, Any] | None:
     return result if result else None
 
 
+class ArtHelpFormatter(argparse.RawDescriptionHelpFormatter):
+    """Custom formatter that suppresses the auto-generated subparser list and provides a clean usage line."""
+
+    def _format_action(self, action: argparse.Action) -> str:
+        if isinstance(action, argparse._SubParsersAction):
+            return ""
+        return super()._format_action(action)
+
+    def _format_usage(self, usage: str | None, actions: Any, groups: Any, prefix: str | None) -> str:
+        if prefix == "":
+            # Called by argparse to compute subparser prog — use default behavior
+            return super()._format_usage(usage, actions, groups, prefix)
+        return "usage: art [-h] [--version] <command> [<args>]\n\n"
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create and configure the argument parser with all subcommands."""
     parser = argparse.ArgumentParser(
         prog="art",
-        description="Manage AI project artifacts across repositories",
+        description=(
+            "Manage AI artifacts across multiple configurations, tools, & repositories.\n"
+            "Commands target the active vault/tool by default (see: art vault select, art tool select)."
+        ),
+        epilog=(
+            "Vault Operations:\n"
+            "  ls              List artifacts in a vault\n"
+            "  rm              Remove artifacts from a vault\n"
+            "  store           Store artifacts from a directory into a vault\n"
+            "  edit            Edit an artifact in your editor\n"
+            "  create          Create new artifacts (skill, command, agent)\n"
+            "\n"
+            "Namespaces:\n"
+            "  vault    (v)    Manage vaults (add, init, rm, name, select, ls)\n"
+            "  tool     (t)    Manage tools (select, ls, add, rm, info)\n"
+            "  project  (p)    Project-side artifact operations (import, rm, wipe, ls)\n"
+            "  config   (c)    Global config artifact operations (import, rm, wipe, ls, edit)\n"
+            "\n"
+            "Discovery:\n"
+            "  spelunk         Discover artifacts in a directory, vault, or global config\n"
+        ),
+        formatter_class=ArtHelpFormatter,
     )
     parser.add_argument(
         "--version", action="version", version=f"%(prog)s {__version__}"
@@ -268,7 +304,8 @@ def create_parser() -> argparse.ArgumentParser:
 
     # project namespace (art project / art proj)
     project_parser = subparsers.add_parser(
-        "project", aliases=["proj", "p"], help="Project-side artifact operations"
+        "project", aliases=["proj", "p"], help="Project-side artifact operations",
+        description="Project-side artifact operations. Commands target the current directory unless --target is specified.",
     )
     proj_subparsers = project_parser.add_subparsers(dest="proj_command")
 
