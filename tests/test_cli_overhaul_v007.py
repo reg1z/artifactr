@@ -1540,14 +1540,14 @@ class TestOldImportRemoved:
 class TestCreateParser:
     """Tests for create_parser verifying all new subcommands exist."""
 
-    def test_list_command(self):
+    def test_ls_command(self):
         parser = create_parser()
-        ns = parser.parse_args(["list"])
-        assert ns.command == "list"
+        ns = parser.parse_args(["ls"])
+        assert ns.command == "ls"
 
-    def test_list_with_type_flags(self):
+    def test_ls_with_type_flags(self):
         parser = create_parser()
-        ns = parser.parse_args(["list", "-S", "foo,bar", "-C"])
+        ns = parser.parse_args(["ls", "-S", "foo,bar", "-C"])
         assert ns.skills == "foo,bar"
         assert ns.commands is True
 
@@ -1610,10 +1610,10 @@ class TestCreateParser:
         assert ns.force is True
         assert ns.tools == "claude"
 
-    def test_proj_list_command(self):
+    def test_proj_ls_command(self):
         parser = create_parser()
-        ns = parser.parse_args(["proj", "list", "--tools", "opencode"])
-        assert ns.proj_command == "list"
+        ns = parser.parse_args(["proj", "ls", "--tools", "opencode"])
+        assert ns.proj_command == "ls"
         assert ns.tools == "opencode"
 
     def test_conf_import_command(self):
@@ -1637,10 +1637,10 @@ class TestCreateParser:
         assert ns.conf_command == "wipe"
         assert ns.force is True
 
-    def test_conf_list_command(self):
+    def test_conf_ls_command(self):
         parser = create_parser()
-        ns = parser.parse_args(["conf", "list", "--tools", "claude-code"])
-        assert ns.conf_command == "list"
+        ns = parser.parse_args(["conf", "ls", "--tools", "claude-code"])
+        assert ns.conf_command == "ls"
         assert ns.tools == "claude-code"
 
     def test_spelunk_no_target(self):
@@ -1674,15 +1674,15 @@ class TestCreateParser:
 
     def test_project_alias(self):
         parser = create_parser()
-        ns = parser.parse_args(["project", "list"])
+        ns = parser.parse_args(["project", "ls"])
         assert ns.command == "project"
-        assert ns.proj_command == "list"
+        assert ns.proj_command == "ls"
 
     def test_config_alias(self):
         parser = create_parser()
-        ns = parser.parse_args(["config", "list"])
+        ns = parser.parse_args(["config", "ls"])
         assert ns.command == "config"
-        assert ns.conf_command == "list"
+        assert ns.conf_command == "ls"
 
 
 # ---------------------------------------------------------------------------
@@ -1880,9 +1880,9 @@ class TestLoadImportCache:
 class TestMainDispatch:
     """Tests for main() routing to correct handlers."""
 
-    def test_main_list_dispatch(self):
+    def test_main_ls_dispatch(self):
         with mock.patch(
-            "sys.argv", ["art", "list"]
+            "sys.argv", ["art", "ls"]
         ), mock.patch(
             "artifactr.cli.handle_list", return_value=0
         ) as mock_handler:
@@ -1930,9 +1930,9 @@ class TestMainDispatch:
         assert rc == 0
         mock_handler.assert_called_once()
 
-    def test_main_proj_list_dispatch(self):
+    def test_main_proj_ls_dispatch(self):
         with mock.patch(
-            "sys.argv", ["art", "proj", "list"]
+            "sys.argv", ["art", "proj", "ls"]
         ), mock.patch(
             "artifactr.cli.handle_proj_list", return_value=0
         ) as mock_handler:
@@ -1970,9 +1970,9 @@ class TestMainDispatch:
         assert rc == 0
         mock_handler.assert_called_once()
 
-    def test_main_conf_list_dispatch(self):
+    def test_main_conf_ls_dispatch(self):
         with mock.patch(
-            "sys.argv", ["art", "conf", "list"]
+            "sys.argv", ["art", "conf", "ls"]
         ), mock.patch(
             "artifactr.cli.handle_conf_list", return_value=0
         ) as mock_handler:
@@ -2004,3 +2004,137 @@ class TestMainDispatch:
         with mock.patch("sys.argv", ["art"]):
             rc = main()
         assert rc == 0
+
+
+# ---------------------------------------------------------------------------
+# Alias comma-separation tests
+# ---------------------------------------------------------------------------
+
+
+class TestToolAddAliasParsing:
+    """Tests for comma-separated alias flattening in art tool add."""
+
+    def test_comma_separated_aliases(self, tmp_path):
+        """--alias a,b should produce aliases: ['a', 'b']."""
+        from artifactr.cli import handle_tool_add
+
+        args = argparse.Namespace(
+            name="my-tool",
+            skills=".t/skills",
+            commands=None,
+            agents=None,
+            global_skills=None,
+            global_commands=None,
+            global_agents=None,
+            aliases=["mt,mytool"],
+            vault=None,
+            global_config=False,
+        )
+        with mock.patch("artifactr.cli.load_global_tools", return_value={}), \
+             mock.patch("artifactr.cli.save_global_tools") as mock_save:
+            handle_tool_add(args)
+
+        saved = mock_save.call_args[0][0]
+        assert saved["my-tool"]["aliases"] == ["mt", "mytool"]
+
+    def test_repeatable_aliases(self, tmp_path):
+        """--alias a --alias b should produce aliases: ['a', 'b']."""
+        from artifactr.cli import handle_tool_add
+
+        args = argparse.Namespace(
+            name="my-tool",
+            skills=".t/skills",
+            commands=None,
+            agents=None,
+            global_skills=None,
+            global_commands=None,
+            global_agents=None,
+            aliases=["mt", "mytool"],
+            vault=None,
+            global_config=False,
+        )
+        with mock.patch("artifactr.cli.load_global_tools", return_value={}), \
+             mock.patch("artifactr.cli.save_global_tools") as mock_save:
+            handle_tool_add(args)
+
+        saved = mock_save.call_args[0][0]
+        assert saved["my-tool"]["aliases"] == ["mt", "mytool"]
+
+    def test_mixed_alias_styles(self, tmp_path):
+        """--alias mt,mytool --alias m should produce aliases: ['mt', 'mytool', 'm']."""
+        from artifactr.cli import handle_tool_add
+
+        args = argparse.Namespace(
+            name="my-tool",
+            skills=".t/skills",
+            commands=None,
+            agents=None,
+            global_skills=None,
+            global_commands=None,
+            global_agents=None,
+            aliases=["mt,mytool", "m"],
+            vault=None,
+            global_config=False,
+        )
+        with mock.patch("artifactr.cli.load_global_tools", return_value={}), \
+             mock.patch("artifactr.cli.save_global_tools") as mock_save:
+            handle_tool_add(args)
+
+        saved = mock_save.call_args[0][0]
+        assert saved["my-tool"]["aliases"] == ["mt", "mytool", "m"]
+
+
+# ---------------------------------------------------------------------------
+# Config edit command tests
+# ---------------------------------------------------------------------------
+
+
+class TestConfigEdit:
+    """Tests for art config edit command."""
+
+    def test_config_edit_parser_registration(self):
+        parser = create_parser()
+        ns = parser.parse_args(["config", "edit"])
+        assert ns.command == "config"
+        assert ns.conf_command == "edit"
+
+    def test_config_edit_via_conf_alias(self):
+        parser = create_parser()
+        ns = parser.parse_args(["conf", "edit"])
+        assert ns.conf_command == "edit"
+
+    def test_config_edit_opens_editor(self, tmp_path):
+        from artifactr.cli import handle_config_edit
+
+        args = argparse.Namespace()
+        config_dir = tmp_path / "config"
+
+        with mock.patch("artifactr.utils.get_editor", return_value="nano"), \
+             mock.patch("artifactr.utils.get_config_dir", return_value=config_dir), \
+             mock.patch("subprocess.run", return_value=mock.Mock(returncode=0)) as mock_run:
+            rc = handle_config_edit(args)
+
+        assert rc == 0
+        mock_run.assert_called_once_with(["nano", str(config_dir / "config.yaml")])
+        assert config_dir.is_dir()
+
+    def test_config_edit_no_editor(self, capsys):
+        from artifactr.cli import handle_config_edit
+
+        args = argparse.Namespace()
+
+        with mock.patch("artifactr.utils.get_editor", return_value=None):
+            rc = handle_config_edit(args)
+
+        assert rc == 1
+        assert "No editor found" in capsys.readouterr().err
+
+    def test_config_edit_dispatch(self):
+        with mock.patch(
+            "sys.argv", ["art", "config", "edit"]
+        ), mock.patch(
+            "artifactr.cli.handle_config_edit", return_value=0
+        ) as mock_handler:
+            rc = main()
+        assert rc == 0
+        mock_handler.assert_called_once()

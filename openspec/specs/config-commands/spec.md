@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Config namespace registration
-The CLI MUST register a `config` subcommand with alias `conf` using argparse's `aliases` parameter. Both `art config <subcommand>` and `art conf <subcommand>` MUST be accepted.
+The CLI MUST register a `config` subcommand with aliases `conf` and `c` using argparse's `aliases` parameter. `art config <subcommand>`, `art conf <subcommand>`, and `art c <subcommand>` MUST all be accepted.
 
 #### Scenario: Using full name
 - **WHEN** `art config import` is run
@@ -9,6 +9,10 @@ The CLI MUST register a `config` subcommand with alias `conf` using argparse's `
 
 #### Scenario: Using alias
 - **WHEN** `art conf import` is run
+- **THEN** it MUST invoke the config import handler
+
+#### Scenario: Using single-letter alias
+- **WHEN** `art c import` is run
 - **THEN** it MUST invoke the config import handler
 
 ### Requirement: Config import command
@@ -109,20 +113,27 @@ The CLI MUST register a `config` subcommand with alias `conf` using argparse's `
 - **THEN** a message MUST be displayed indicating no imported artifacts were found
 
 ### Requirement: Config list command
-`art conf list` MUST display globally imported artifacts by reading `.art-cache-global/imported`.
+`art config ls` MUST display globally imported artifacts by reading `.art-cache-global/imported`.
 
 #### Scenario: List all
-- **WHEN** `art conf list` is run
+- **WHEN** `art config ls` is run
 - **THEN** all globally imported artifacts MUST be listed
 
 #### Scenario: List with type filter
-- **WHEN** `art conf list -S` is run
+- **WHEN** `art config ls -S` is run
 - **THEN** only globally imported skills MUST be shown
 
 #### Scenario: List with tool filter
-- **WHEN** `art conf list --tools opencode` is run
+- **WHEN** `art config ls --tools opencode` is run
 - **THEN** only artifacts imported for opencode MUST be shown
 
 #### Scenario: List with no imports
-- **WHEN** `art conf list` is run and no `.art-cache-global` exists
+- **WHEN** `art config ls` is run and no `.art-cache-global` exists
 - **THEN** a message MUST be displayed indicating no imported artifacts were found
+
+### Requirement: Config edit subcommand
+The `config` namespace MUST expose an `edit` subcommand.
+
+#### Scenario: Config edit registration
+- **WHEN** `art config` help is displayed
+- **THEN** `edit` MUST appear in the list of available subcommands

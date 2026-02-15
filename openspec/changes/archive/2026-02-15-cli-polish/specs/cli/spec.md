@@ -1,6 +1,6 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
-### Requirement: Art ls subcommand
+### Requirement: Art list subcommand
 The CLI MUST register an `art ls` subcommand at the top level.
 
 #### Scenario: Art ls arguments
@@ -10,16 +10,6 @@ The CLI MUST register an `art ls` subcommand at the top level.
   - `-S`/`--skills` (`nargs='?'`) - filter to skills, optional names
   - `-C`/`--commands` (`nargs='?'`) - filter to commands, optional names
   - `-A`/`--agents` (`nargs='?'`) - filter to agents, optional names
-
-### Requirement: Art rm subcommand
-The CLI MUST register an `art rm` subcommand at the top level.
-
-#### Scenario: Art rm arguments
-- **WHEN** `art rm` is parsed
-- **THEN** argparse MUST accept:
-  - Positional: `names` (`nargs='+'`) - artifact names to remove (supports `type/name` prefix)
-  - `--vault` - target specific vault
-  - `-f`/`--force` - skip confirmation
 
 ### Requirement: Project namespace subcommand
 The CLI MUST register a `project` subcommand with aliases `proj` and `p`.
@@ -35,6 +25,8 @@ The CLI MUST register a `config` subcommand with aliases `conf` and `c`.
 - **WHEN** `art config`, `art conf`, or `art c` is parsed
 - **THEN** it MUST expose subcommands: `import`, `rm`, `wipe`, `ls`, `edit`
 
+## ADDED Requirements
+
 ### Requirement: Vault namespace aliases
 The CLI MUST register a `vault` subcommand with alias `v`.
 
@@ -49,26 +41,24 @@ The CLI MUST register a `tool` subcommand with alias `t`.
 - **WHEN** `art t` is parsed
 - **THEN** it MUST behave identically to `art tool`
 
-### Requirement: Store type filter flags
-The `art store` subcommand MUST accept type filter flags.
+## RENAMED Requirements
 
-#### Scenario: Store type filter arguments
-- **WHEN** `art store` is parsed
-- **THEN** argparse MUST accept `-S`/`--skills`, `-C`/`--commands`, `-A`/`--agents` with `nargs='?'`
+### Requirement: Art list subcommand
+- **FROM:** `art list`
+- **TO:** `art ls`
 
-### Requirement: Spelunk enhanced arguments
-The `art spelunk` subcommand MUST accept enhanced arguments.
+### Requirement: Vault list subcommand
+- **FROM:** `art vault list`
+- **TO:** `art vault ls`
 
-#### Scenario: Spelunk arguments
-- **WHEN** `art spelunk` is parsed
-- **THEN** argparse MUST accept:
-  - Positional: `target` (`nargs='?'`) - optional, no default
-  - `-g`/`--global` - explicit global config scanning
-  - `--tools` - comma-separated tool filter
-  - `-S`/`--skills`, `-C`/`--commands`, `-A`/`--agents` with `nargs='?'`
+### Requirement: Tool list subcommand
+- **FROM:** `art tool list`
+- **TO:** `art tool ls`
 
-## REMOVED Requirements
+### Requirement: Config list subcommand
+- **FROM:** `art config list` / `art conf list`
+- **TO:** `art config ls` / `art conf ls`
 
-### Requirement: Top-level import subcommand
-**Reason**: Replaced by `art proj import` and `art conf import` namespaces.
-**Migration**: Use `art proj import [target]` or `art conf import`.
+### Requirement: Project list subcommand
+- **FROM:** `art project list` / `art proj list`
+- **TO:** `art project ls` / `art proj ls`

@@ -54,11 +54,11 @@ Tools MUST be resolved from three sources with ascending precedence: built-in de
 - **THEN** only tool definitions from the vault being imported from participate in resolution, not all registered vaults
 
 #### Scenario: Default vault tools in CLI resolution
-- **WHEN** `art tool list` or `art tool select` is run
+- **WHEN** `art tool ls` or `art tool select` is run
 - **THEN** tool resolution MUST include the default vault's tool definitions as the vault tier
 
 #### Scenario: Explicit vault override in CLI resolution
-- **WHEN** `art tool list --vault=X` is run
+- **WHEN** `art tool ls --vault=X` is run
 - **THEN** vault X's tool definitions MUST replace the default vault's definitions in resolution
 
 ### Requirement: User global config tool storage
@@ -106,9 +106,17 @@ The `art tool add <name>` command MUST create a custom tool definition and store
 - **WHEN** `art tool add my-tool --skills .t/skills --alias mt` is run
 - **THEN** the tool definition MUST include `aliases: ["mt"]`
 
-#### Scenario: Add tool with multiple aliases
+#### Scenario: Add tool with multiple aliases via repeatable flag
 - **WHEN** `art tool add my-tool --skills .t/skills --alias mt --alias mytool` is run
 - **THEN** the tool definition MUST include `aliases: ["mt", "mytool"]`
+
+#### Scenario: Add tool with multiple aliases via comma separation
+- **WHEN** `art tool add my-tool --skills .t/skills --alias mt,mytool` is run
+- **THEN** the tool definition MUST include `aliases: ["mt", "mytool"]`
+
+#### Scenario: Add tool with mixed alias styles
+- **WHEN** `art tool add my-tool --skills .t/skills --alias mt,mytool --alias m` is run
+- **THEN** the tool definition MUST include `aliases: ["mt", "mytool", "m"]`
 
 #### Scenario: Duplicate tool name
 - **WHEN** `art tool add my-tool` is run and `my-tool` already exists in the target config
