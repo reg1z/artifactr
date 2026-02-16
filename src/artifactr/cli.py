@@ -544,7 +544,7 @@ def create_parser() -> argparse.ArgumentParser:
 
     # create skill
     create_skill_parser = create_subparsers.add_parser(
-        "skill", help="Create a new skill"
+        "skill", aliases=["s"], help="Create a new skill"
     )
     create_skill_parser.add_argument(
         "skill_name", help="Skill identifier (directory name)"
@@ -577,7 +577,7 @@ def create_parser() -> argparse.ArgumentParser:
 
     # create command
     create_command_parser = create_subparsers.add_parser(
-        "command", help="Create a new command"
+        "command", aliases=["c"], help="Create a new command"
     )
     create_command_parser.add_argument(
         "command_name", help="Command identifier (filename)"
@@ -606,7 +606,7 @@ def create_parser() -> argparse.ArgumentParser:
 
     # create agent
     create_agent_parser = create_subparsers.add_parser(
-        "agent", help="Create a new agent"
+        "agent", aliases=["a"], help="Create a new agent"
     )
     create_agent_parser.add_argument(
         "agent_name", help="Agent identifier"
@@ -2580,11 +2580,11 @@ def _main() -> int:
             parser.parse_args(["create", "--help"])
             return 0
 
-        if args.create_command == "skill":
+        if args.create_command in ("skill", "s"):
             return handle_create_skill(args)
-        if args.create_command == "command":
+        if args.create_command in ("command", "c"):
             return handle_create_artifact(args, "command")
-        if args.create_command == "agent":
+        if args.create_command in ("agent", "a"):
             return handle_create_artifact(args, "agent")
 
     return 0
