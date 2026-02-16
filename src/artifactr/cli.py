@@ -116,6 +116,39 @@ def resolve_type_filters(args: argparse.Namespace) -> dict[str, Any] | None:
     return result if result else None
 
 
+def check_import_health(
+    artifact_name: str,
+    artifact_type: str,
+    vault_name: str,
+) -> str | None:
+    """Check whether an imported artifact's source still exists.
+
+    Returns:
+        None if source exists, "source missing" if artifact gone from vault,
+        "vault not found" if vault itself is missing.
+    """
+    vault_path_str = get_vault_by_name_or_path(vault_name)
+    if vault_path_str is None:
+        return "vault not found"
+
+    vault_path = Path(vault_path_str)
+    if not vault_path.is_dir():
+        return "vault not found"
+
+    type_to_plural = {"skill": "skills", "command": "commands", "agent": "agents"}
+    type_plural = type_to_plural.get(artifact_type, artifact_type + "s")
+
+    if artifact_type == "skill":
+        source = vault_path / type_plural / artifact_name / "SKILL.md"
+    else:
+        source = vault_path / type_plural / f"{artifact_name}.md"
+
+    if not source.exists():
+        return "source missing"
+
+    return None
+
+
 class ArtHelpFormatter(argparse.RawDescriptionHelpFormatter):
     """Custom formatter that suppresses the auto-generated subparser list and provides a clean usage line."""
 
@@ -143,18 +176,18 @@ def create_parser() -> argparse.ArgumentParser:
             "Vault Operations:\n"
             "  ls              List artifacts in a vault\n"
             "  rm              Remove artifacts from a vault\n"
-            "  store           Store artifacts from a directory into a vault\n"
-            "  edit            Edit an artifact in your editor\n"
-            "  create          Create new artifacts (skill, command, agent)\n"
+            "  store    (st)   Store artifacts from a directory into a vault\n"
+            "  edit     (ed)   Edit an artifact in your editor\n"
+            "  create   (cr)   Create new artifacts (skill, command, agent)\n"
             "\n"
             "Namespaces:\n"
             "  vault    (v)    Manage vaults (add, init, rm, name, select, ls)\n"
             "  tool     (t)    Manage tools (select, ls, add, rm, info)\n"
             "  project  (p)    Project-side artifact operations (import, rm, wipe, ls)\n"
-            "  config   (c)    Global config artifact operations (import, rm, wipe, ls, edit)\n"
+            "  config   (c)    Tool-specific global configs & artifactr settings (import, rm, wipe, ls, edit)\n"
             "\n"
             "Discovery:\n"
-            "  spelunk         Discover artifacts in a directory, vault, or global config\n"
+            "  spelunk  (sp)   Discover artifacts in a directory, vault, or global config\n"
         ),
         formatter_class=ArtHelpFormatter,
     )
@@ -165,7 +198,10 @@ def create_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # vault command with subcommands
-    vault_parser = subparsers.add_parser("vault", aliases=["v"], help="Manage vaults")
+    vault_parser = subparsers.add_parser(
+        "vault", aliases=["v"], help="Manage vaults",
+        description="Manage artifact vaults — named directories that organize your skills, commands, and agents. Vaults can be shared across projects and referenced by name.",
+    )
     vault_subparsers = vault_parser.add_subparsers(dest="vault_command")
 
     # vault add
@@ -213,7 +249,10 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     # tool command with subcommands
-    tool_parser = subparsers.add_parser("tool", aliases=["t"], help="Manage tools")
+    tool_parser = subparsers.add_parser(
+        "tool", aliases=["t"], help="Manage tools",
+        description="Manage AI tool definitions. Tools describe where artifacts live in each tool's config structure (e.g., ~/.claude/commands/). Select a default tool or register custom ones.",
+    )
     tool_subparsers = tool_parser.add_subparsers(dest="tool_command")
 
     # tool select
@@ -266,7 +305,8 @@ def create_parser() -> argparse.ArgumentParser:
 
     # ls command (vault-side)
     list_parser = subparsers.add_parser(
-        "ls", aliases=["list"], help="List artifacts in a vault"
+        "ls", aliases=["list"], help="List artifacts in a vault",
+        description="List artifacts stored in a vault. Shows skills, commands, and agents with their types and descriptions. Targets the default vault unless --vault is specified.",
     )
     list_parser.add_argument(
         "--vault", help="Vault to list from (default: default vault)"
@@ -275,7 +315,8 @@ def create_parser() -> argparse.ArgumentParser:
 
     # rm command (vault-side)
     rm_parser = subparsers.add_parser(
-        "rm", help="Remove artifacts from a vault"
+        "rm", help="Remove artifacts from a vault",
+        description="Remove artifacts from a vault by name. Supports type/name prefix syntax (e.g., skill/my-skill). Asks for confirmation unless --force is used.",
     )
     rm_parser.add_argument(
         "names", nargs="+", help="Artifact names to remove (supports type/name prefix)"
@@ -290,7 +331,8 @@ def create_parser() -> argparse.ArgumentParser:
 
     # spelunk command
     spelunk_parser = subparsers.add_parser(
-        "spelunk", help="Discover artifacts in a directory, vault, or global config"
+        "spelunk", aliases=["sp"], help="Discover artifacts in a directory, vault, or global config",
+        description="Discover and display artifacts in a directory, vault, or your global tool configs. Useful for seeing what's available before importing or storing. Defaults to scanning global config directories if no target is given.",
     )
     spelunk_parser.add_argument("target", nargs="?", default=None, help="Path to directory to probe")
     spelunk_parser.add_argument(
@@ -305,7 +347,7 @@ def create_parser() -> argparse.ArgumentParser:
     # project namespace (art project / art proj)
     project_parser = subparsers.add_parser(
         "project", aliases=["proj", "p"], help="Project-side artifact operations",
-        description="Project-side artifact operations. Commands target the current directory unless --target is specified.",
+        description="Manage artifacts within a project. Import from vaults, remove imported artifacts, or list what's been imported. Commands target the current directory unless --target is specified.",
     )
     proj_subparsers = project_parser.add_subparsers(dest="proj_command")
 
@@ -386,13 +428,15 @@ def create_parser() -> argparse.ArgumentParser:
 
     # config namespace (art config / art conf)
     config_parser = subparsers.add_parser(
-        "config", aliases=["conf", "c"], help="Global config artifact operations"
+        "config", aliases=["conf", "c"],
+        help="Tool-specific global configs & artifactr settings",
+        description="Manage tool-specific global config directories and artifactr's own settings. Use 'import' to copy artifacts into your tools' global config folders (e.g., ~/.claude/commands/). Use 'edit' to open artifactr's own global YAML configuration.",
     )
     conf_subparsers = config_parser.add_subparsers(dest="conf_command")
 
     # conf import
     conf_import = conf_subparsers.add_parser(
-        "import", help="Import artifacts into global config directories"
+        "import", help="Import artifacts into tool-specific global config directories (e.g., ~/.claude/commands/)"
     )
     conf_import.add_argument(
         "--vault", help="Vault to import from (default: default vault)"
@@ -450,23 +494,31 @@ def create_parser() -> argparse.ArgumentParser:
     add_type_filter_args(conf_list)
 
     # conf edit
-    conf_subparsers.add_parser("edit", help="Open global config file in editor")
+    conf_subparsers.add_parser("edit", aliases=["ed"], help="Open artifactr's global YAML config in editor")
 
     # store command
     store_parser = subparsers.add_parser(
-        "store", help="Store artifacts from a directory into a vault"
+        "store", aliases=["st"], help="Store artifacts from a directory into a vault",
+        description="Discover artifacts in a directory and store them into a vault. Presents an interactive selection menu to choose which artifacts to store. Use --force to overwrite existing artifacts without prompting. Type filters (-S, -C, -A) narrow which artifacts are discovered.",
     )
     store_parser.add_argument("target_dir", help="Path to directory containing artifacts")
     store_parser.add_argument(
         "--vault", help="Vault to store into (default: default vault)"
     )
+    store_parser.add_argument(
+        "-f", "--force", action="store_true",
+        help="Overwrite existing artifacts in the vault without prompting",
+    )
     add_type_filter_args(store_parser)
 
     # edit command
-    edit_parser = subparsers.add_parser("edit", help="Edit an artifact in your editor")
+    edit_parser = subparsers.add_parser(
+        "edit", aliases=["ed"], help="Edit an artifact in your editor",
+        description="Open an artifact's markdown file in your terminal editor. Targets the default vault unless --vault or --here is specified. Supports short type aliases: s (skill), c (command), a (agent).",
+    )
     edit_parser.add_argument(
-        "artifact_type", choices=["skill", "agent", "command"],
-        help="Type of artifact to edit",
+        "artifact_type", choices=["skill", "s", "agent", "a", "command", "c"],
+        help="Type of artifact to edit (skill/s, command/c, agent/a)",
     )
     edit_parser.add_argument(
         "artifact_name", help="Name of the artifact to edit",
@@ -484,7 +536,10 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     # create command with subcommands
-    create_parser = subparsers.add_parser("create", help="Create new artifacts")
+    create_parser = subparsers.add_parser(
+        "create", aliases=["cr"], help="Create new artifacts",
+        description="Create new artifacts from the command line. Specify the type (skill, command, or agent) and provide a description. Targets the default vault unless --vault or --here is specified.",
+    )
     create_subparsers = create_parser.add_subparsers(dest="create_command")
 
     # create skill
@@ -2215,8 +2270,14 @@ def handle_spelunk(args: argparse.Namespace) -> int:
         name_col = art["name"]
 
         if art["name"] in import_cache:
-            vault_names = ", ".join(import_cache[art["name"]])
-            name_col += f" (imported: {vault_names})"
+            vault_parts = []
+            for vname in import_cache[art["name"]]:
+                health = check_import_health(art["name"], art["type"], vname)
+                if health:
+                    vault_parts.append(f"{vname}, {health}")
+                else:
+                    vault_parts.append(vname)
+            name_col += f" (imported: {'; '.join(vault_parts)})"
 
         description = extract_description(art)
         tool_label = art["tool"]
@@ -2271,6 +2332,8 @@ def handle_store(args: argparse.Namespace) -> int:
         print(f"No artifacts found in {args.target_dir}")
         return 0
 
+    force = getattr(args, "force", False)
+
     print(f"Discovered artifacts in {target}:")
     for i, art in enumerate(artifacts, 1):
         rel_path = art["path"].relative_to(target)
@@ -2289,7 +2352,7 @@ def handle_store(args: argparse.Namespace) -> int:
     for idx in indices:
         art = artifacts[idx]
         dest = vault_path / art["type_plural"] / (art["path"].name if art["type"] == "skill" else art["path"].name)
-        result = copy_with_prompt(art["path"], dest)
+        result = copy_with_prompt(art["path"], dest, force=force)
         if result["copied"] > 0:
             print(f"Stored: {art['name']} ({art['type']}) -> {dest}")
             stored_count += 1
@@ -2304,7 +2367,8 @@ def handle_edit(args: argparse.Namespace) -> int:
 
     from .utils import get_editor
 
-    artifact_type = args.artifact_type
+    type_aliases = {"s": "skill", "c": "command", "a": "agent"}
+    artifact_type = type_aliases.get(args.artifact_type, args.artifact_type)
     artifact_name = args.artifact_name
     vault = getattr(args, "vault", None)
     here = getattr(args, "here", False)
@@ -2416,6 +2480,15 @@ def handle_create_skill(args: argparse.Namespace) -> int:
 
 def main() -> int:
     """Main entry point for the CLI."""
+    try:
+        return _main()
+    except KeyboardInterrupt:
+        print()
+        return 130
+
+
+def _main() -> int:
+    """Internal main dispatch."""
     parser = create_parser()
     args = parser.parse_args()
 
@@ -2456,7 +2529,7 @@ def main() -> int:
             return handle_conf_wipe(args)
         if conf_cmd in ("ls", "list"):
             return handle_conf_list(args)
-        if conf_cmd == "edit":
+        if conf_cmd in ("edit", "ed"):
             return handle_config_edit(args)
 
     if args.command in ("vault", "v"):
@@ -2493,16 +2566,16 @@ def main() -> int:
         if args.tool_command == "info":
             return handle_tool_info(args)
 
-    if args.command == "spelunk":
+    if args.command in ("spelunk", "sp"):
         return handle_spelunk(args)
 
-    if args.command == "store":
+    if args.command in ("store", "st"):
         return handle_store(args)
 
-    if args.command == "edit":
+    if args.command in ("edit", "ed"):
         return handle_edit(args)
 
-    if args.command == "create":
+    if args.command in ("create", "cr"):
         if args.create_command is None:
             parser.parse_args(["create", "--help"])
             return 0

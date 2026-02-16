@@ -1,22 +1,4 @@
-## ADDED Requirements
-
-### Requirement: Base command description
-The `art` parser description MUST be "Manage AI artifacts across multiple configurations, tools, & repositories."
-
-#### Scenario: Help output description
-- **WHEN** `art --help` is run
-- **THEN** the description "Manage AI artifacts across multiple configurations, tools, & repositories." MUST appear
-
-### Requirement: Custom help formatter
-The `art` parser MUST use a custom formatter class that suppresses the auto-generated subparser listing and provides a custom usage line.
-
-#### Scenario: Usage line format
-- **WHEN** `art --help` is run
-- **THEN** the usage line MUST read `usage: art [-h] [--version] <command> [<args>]`
-
-#### Scenario: No auto-generated subparser list
-- **WHEN** `art --help` is run
-- **THEN** the default argparse "positional arguments" group listing subcommands MUST NOT appear
+## MODIFIED Requirements
 
 ### Requirement: Categorized command groups in epilog
 The `art` parser epilog MUST display commands grouped into categories. Command aliases SHALL be shown in parentheses next to the command name.
@@ -37,30 +19,7 @@ The `art` parser epilog MUST display commands grouped into categories. Command a
 - **WHEN** `art --help` is run
 - **THEN** the `config` entry in the Namespaces section SHALL indicate it covers both tool-specific global configs and artifactr's own configuration
 
-### Requirement: Default-targeting documentation
-The `art --help` output MUST document default-targeting behavior.
-
-#### Scenario: Vault/tool default note
-- **WHEN** `art --help` is run
-- **THEN** the output MUST include a note that commands target the active vault/tool by default, referencing `art vault select` and `art tool select`
-
-### Requirement: Subcommand help descriptions
-Every registered subcommand and sub-subcommand MUST have a non-empty `help=` string in its `add_parser()` call.
-
-#### Scenario: Top-level subcommands
-- **WHEN** any top-level subcommand's `add_parser()` is registered
-- **THEN** it MUST include a `help=` parameter with a brief informative description
-
-#### Scenario: Nested subcommands
-- **WHEN** any nested subcommand (e.g., `art vault add`, `art tool select`) is registered
-- **THEN** it MUST include a `help=` parameter with a brief informative description
-
-### Requirement: Project targeting documentation
-The `art project --help` output MUST document that the current working directory is targeted by default.
-
-#### Scenario: Project help note
-- **WHEN** `art project --help` is run
-- **THEN** the description MUST note that commands target the current directory unless `--target` is specified
+## ADDED Requirements
 
 ### Requirement: Top-level command description paragraphs
 Each top-level command and namespace SHALL have a `description=` parameter that provides a brief, friendly explanation shown in its own `-h` output.
