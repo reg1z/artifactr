@@ -460,7 +460,7 @@ class TestToolListVaultAware:
             "tools": {},
         }
 
-        args = argparse.Namespace(vault=None)
+        args = argparse.Namespace(vaults=None, show_all=False)
         with mock.patch("artifactr.config.load_config", return_value=config), \
              mock.patch("artifactr.catalog.load_config", return_value=config):
             handle_tool_list(args)
@@ -488,7 +488,7 @@ class TestToolListVaultAware:
             "tools": {},
         }
 
-        args = argparse.Namespace(vault="alt-vault")
+        args = argparse.Namespace(vaults=["alt-vault"], show_all=False)
         with mock.patch("artifactr.config.load_config", return_value=config), \
              mock.patch("artifactr.catalog.load_config", return_value=config):
             handle_tool_list(args)
@@ -555,7 +555,7 @@ class TestToolInfoCatalog:
             "tools": {"global-tool": {"skills": ".gt/skills"}},
         }
 
-        args = argparse.Namespace(name=None, vault=None, global_filter=False)
+        args = argparse.Namespace(name=None, vaults=None, global_filter=False, show_all=False)
         with mock.patch("artifactr.config.load_config", return_value=config), \
              mock.patch("artifactr.catalog.load_config", return_value=config), \
              mock.patch("artifactr.cli.load_cwd_vault_tools", return_value={}):
@@ -592,7 +592,7 @@ class TestToolInfoDetail:
             "tools": {},
         }
 
-        args = argparse.Namespace(name="claude-code", vault=None, global_filter=False)
+        args = argparse.Namespace(name="claude-code", vaults=None, global_filter=False, show_all=False)
         with mock.patch("artifactr.config.load_config", return_value=config), \
              mock.patch("artifactr.catalog.load_config", return_value=config), \
              mock.patch("artifactr.cli.load_cwd_vault_tools", return_value={}):
@@ -609,8 +609,8 @@ class TestToolInfoDetail:
 class TestToolInfoVaultFilter:
     """Tests for art tool info --vault filtering."""
 
-    def test_vault_no_value_filters_default(self, tmp_path, capsys):
-        """Verify --vault (no value) filters to default vault."""
+    def test_vault_filter_to_specific_vault(self, tmp_path, capsys):
+        """Verify -V <vault> filters to that vault."""
         import argparse
         from artifactr.cli import handle_tool_info
 
@@ -625,11 +625,11 @@ class TestToolInfoVaultFilter:
             "vaults": [str(vault_dir)],
             "default_vault": str(vault_dir),
             "default_tool": "opencode",
-            "vault_names": {},
+            "vault_names": {str(vault_dir): "default-vault"},
             "tools": {"global-tool": {"skills": ".gt/skills"}},
         }
 
-        args = argparse.Namespace(name=None, vault=True, global_filter=False)
+        args = argparse.Namespace(name=None, vaults=["default-vault"], global_filter=False, show_all=False)
         with mock.patch("artifactr.config.load_config", return_value=config), \
              mock.patch("artifactr.catalog.load_config", return_value=config), \
              mock.patch("artifactr.cli.load_cwd_vault_tools", return_value={}):
@@ -661,7 +661,7 @@ class TestToolInfoVaultFilter:
             "tools": {},
         }
 
-        args = argparse.Namespace(name=None, vault="specific-vault", global_filter=False)
+        args = argparse.Namespace(name=None, vaults=["specific-vault"], global_filter=False, show_all=False)
         with mock.patch("artifactr.config.load_config", return_value=config), \
              mock.patch("artifactr.catalog.load_config", return_value=config), \
              mock.patch("artifactr.cli.load_cwd_vault_tools", return_value={}):
@@ -688,7 +688,7 @@ class TestToolInfoGlobalFilter:
             "tools": {"my-global-tool": {"skills": ".mgt/skills"}},
         }
 
-        args = argparse.Namespace(name=None, vault=None, global_filter=True)
+        args = argparse.Namespace(name=None, vaults=None, global_filter=True, show_all=False)
         with mock.patch("artifactr.config.load_config", return_value=config), \
              mock.patch("artifactr.catalog.load_config", return_value=config), \
              mock.patch("artifactr.cli.load_cwd_vault_tools", return_value={}):
@@ -724,7 +724,7 @@ class TestToolInfoDetailVaultFilter:
             "tools": {},
         }
 
-        args = argparse.Namespace(name="claude-code", vault="test-vault", global_filter=False)
+        args = argparse.Namespace(name="claude-code", vaults=["test-vault"], global_filter=False, show_all=False)
         with mock.patch("artifactr.config.load_config", return_value=config), \
              mock.patch("artifactr.catalog.load_config", return_value=config), \
              mock.patch("artifactr.cli.load_cwd_vault_tools", return_value={}):
@@ -753,7 +753,7 @@ class TestToolInfoNoResults:
             "tools": {},
         }
 
-        args = argparse.Namespace(name=None, vault=None, global_filter=True)
+        args = argparse.Namespace(name=None, vaults=None, global_filter=True, show_all=False)
         with mock.patch("artifactr.config.load_config", return_value=config), \
              mock.patch("artifactr.catalog.load_config", return_value=config), \
              mock.patch("artifactr.cli.load_cwd_vault_tools", return_value={}):
@@ -776,7 +776,7 @@ class TestToolInfoNoResults:
             "tools": {},
         }
 
-        args = argparse.Namespace(name="nonexistent", vault=None, global_filter=False)
+        args = argparse.Namespace(name="nonexistent", vaults=None, global_filter=False, show_all=False)
         with mock.patch("artifactr.config.load_config", return_value=config), \
              mock.patch("artifactr.catalog.load_config", return_value=config), \
              mock.patch("artifactr.cli.load_cwd_vault_tools", return_value={}):

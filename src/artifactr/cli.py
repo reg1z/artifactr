@@ -267,7 +267,14 @@ def create_parser() -> argparse.ArgumentParser:
 
     # tool ls
     tool_list = tool_subparsers.add_parser("ls", aliases=["list"], help="List supported tools")
-    tool_list.add_argument("-V", "--vault", help="Use tools from this vault instead of the default vault")
+    tool_list.add_argument(
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Use tools from this vault — comma-separated or repeatable",
+    )
+    tool_list.add_argument(
+        "-a", "--all", action="store_true", dest="show_all",
+        help="List tools from all catalog vaults and global config",
+    )
 
     # tool add
     tool_add = tool_subparsers.add_parser("add", help="Add a custom tool definition")
@@ -282,7 +289,10 @@ def create_parser() -> argparse.ArgumentParser:
         "--alias", action="append", default=[], dest="aliases",
         help="Tool alias (repeatable)",
     )
-    tool_add.add_argument("-V", "--vault", help="Store in vault's metadata instead of global config")
+    tool_add.add_argument(
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Store in vault's metadata — comma-separated or repeatable",
+    )
     tool_add.add_argument(
         "-g", "--global", action="store_true", dest="global_config",
         help="Explicitly store in global config (default behavior)",
@@ -301,8 +311,12 @@ def create_parser() -> argparse.ArgumentParser:
     tool_info = tool_subparsers.add_parser("info", help="Show tool information and catalog")
     tool_info.add_argument("name", nargs="?", help="Tool identifier to display (omit for catalog view)")
     tool_info.add_argument(
-        "--vault", nargs="?", const=True, default=None,
-        help="Filter to vault tools (no value = default vault, with value = specific vault)",
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Filter to vault tools — comma-separated or repeatable",
+    )
+    tool_info.add_argument(
+        "-a", "--all", action="store_true", dest="show_all",
+        help="Show all tool definitions from all sources",
     )
     tool_info.add_argument(
         "-g", "--global", action="store_true", dest="global_filter",
@@ -315,7 +329,8 @@ def create_parser() -> argparse.ArgumentParser:
         description="List artifacts stored in a vault. Shows skills, commands, and agents with their types and descriptions. Targets the default vault unless --vault is specified.",
     )
     list_parser.add_argument(
-        "-V", "--vault", help="Vault to list from (default: default vault)"
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Vault to list from — comma-separated or repeatable (default: default vault)",
     )
     add_type_filter_args(list_parser)
 
@@ -373,7 +388,8 @@ def create_parser() -> argparse.ArgumentParser:
         "target", nargs="?", default=None, help="Path to target git repository (default: cwd)"
     )
     proj_import.add_argument(
-        "-V", "--vault", help="Vault to import from (default: default vault)"
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Vault to import from — comma-separated or repeatable (default: default vault)",
     )
     proj_import.add_argument(
         "--tools", help="Comma-separated list of tools to import",
@@ -411,6 +427,10 @@ def create_parser() -> argparse.ArgumentParser:
         "--tools", help="Comma-separated tool filter",
     )
     proj_rm.add_argument(
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Filter by vault — comma-separated or repeatable",
+    )
+    proj_rm.add_argument(
         "-f", "--force", action="store_true",
         help="Skip confirmation prompt",
     )
@@ -427,6 +447,10 @@ def create_parser() -> argparse.ArgumentParser:
         "--tools", help="Comma-separated tool filter",
     )
     proj_wipe.add_argument(
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Filter by vault — comma-separated or repeatable",
+    )
+    proj_wipe.add_argument(
         "-f", "--force", action="store_true",
         help="Skip confirmation prompt",
     )
@@ -441,6 +465,10 @@ def create_parser() -> argparse.ArgumentParser:
     )
     proj_list.add_argument(
         "--tools", help="Comma-separated tool filter",
+    )
+    proj_list.add_argument(
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Filter by vault — comma-separated or repeatable",
     )
     add_type_filter_args(proj_list)
 
@@ -497,7 +525,8 @@ def create_parser() -> argparse.ArgumentParser:
         "import", help="Import artifacts into tool-specific global config directories (e.g., ~/.claude/commands/)"
     )
     conf_import.add_argument(
-        "-V", "--vault", help="Vault to import from (default: default vault)"
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Vault to import from — comma-separated or repeatable (default: default vault)",
     )
     conf_import.add_argument(
         "--tools", help="Comma-separated list of tools to import",
@@ -524,6 +553,10 @@ def create_parser() -> argparse.ArgumentParser:
         "--tools", help="Comma-separated tool filter",
     )
     conf_rm.add_argument(
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Filter by vault — comma-separated or repeatable",
+    )
+    conf_rm.add_argument(
         "-f", "--force", action="store_true",
         help="Skip confirmation prompt",
     )
@@ -537,6 +570,10 @@ def create_parser() -> argparse.ArgumentParser:
         "--tools", help="Comma-separated tool filter",
     )
     conf_wipe.add_argument(
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Filter by vault — comma-separated or repeatable",
+    )
+    conf_wipe.add_argument(
         "-f", "--force", action="store_true",
         help="Skip confirmation prompt",
     )
@@ -548,6 +585,10 @@ def create_parser() -> argparse.ArgumentParser:
     )
     conf_list.add_argument(
         "--tools", help="Comma-separated tool filter",
+    )
+    conf_list.add_argument(
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Filter by vault — comma-separated or repeatable",
     )
     add_type_filter_args(conf_list)
 
@@ -595,7 +636,8 @@ def create_parser() -> argparse.ArgumentParser:
     )
     store_parser.add_argument("target_dir", nargs="?", default=None, help="Path to directory containing artifacts")
     store_parser.add_argument(
-        "-V", "--vault", help="Vault to store into (default: default vault)"
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Vault to store into — comma-separated or repeatable (default: default vault)",
     )
     store_parser.add_argument(
         "-g", "--global", action="store_true", dest="global_store",
@@ -667,7 +709,8 @@ def create_parser() -> argparse.ArgumentParser:
         help="Create in current project instead of vault",
     )
     create_skill_parser.add_argument(
-        "-V", "--vault", help="Target vault (name or path)",
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Target vault — comma-separated or repeatable (name or path)",
     )
     create_skill_parser.add_argument(
         "--tools",
@@ -696,7 +739,8 @@ def create_parser() -> argparse.ArgumentParser:
         help="Create in current project instead of vault",
     )
     create_command_parser.add_argument(
-        "-V", "--vault", help="Target vault (name or path)",
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Target vault — comma-separated or repeatable (name or path)",
     )
     create_command_parser.add_argument(
         "--tools",
@@ -729,7 +773,8 @@ def create_parser() -> argparse.ArgumentParser:
         help="Create in current project instead of vault",
     )
     create_agent_parser.add_argument(
-        "-V", "--vault", help="Target vault (name or path)",
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Target vault — comma-separated or repeatable (name or path)",
     )
     create_agent_parser.add_argument(
         "--tools",
@@ -739,23 +784,33 @@ def create_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _load_vault_tools_for_import(args: argparse.Namespace) -> tuple[dict, dict]:
-    """Load global and vault tools for import operations."""
+def _load_vault_tools_for_import(args: argparse.Namespace, vault_path_str: str | None = None) -> tuple[dict, dict]:
+    """Load global and vault tools for import operations.
+
+    Args:
+        args: Parsed arguments (checks for .vaults or .vault).
+        vault_path_str: If provided, use this vault path directly.
+    """
     from .tools import reload_registry
 
     global_tools = load_global_tools()
     vault_tools: dict[str, dict] = {}
-    vault_identifier = getattr(args, "vault", None)
-    if vault_identifier:
-        vault_path = get_vault_by_name_or_path(vault_identifier)
-        if vault_path:
-            meta = load_vault_metadata(vault_path)
-            vault_tools = meta.get("tools", {})
+
+    if vault_path_str:
+        meta = load_vault_metadata(vault_path_str)
+        vault_tools = meta.get("tools", {})
     else:
-        default_vault = get_default_vault()
-        if default_vault:
-            meta = load_vault_metadata(default_vault)
-            vault_tools = meta.get("tools", {})
+        vault_identifier = getattr(args, "vault", None)
+        if vault_identifier:
+            vault_path = get_vault_by_name_or_path(vault_identifier)
+            if vault_path:
+                meta = load_vault_metadata(vault_path)
+                vault_tools = meta.get("tools", {})
+        else:
+            default_vault = get_default_vault()
+            if default_vault:
+                meta = load_vault_metadata(default_vault)
+                vault_tools = meta.get("tools", {})
 
     reload_registry(global_tools=global_tools, vault_tools=vault_tools)
     return global_tools, vault_tools
@@ -763,43 +818,54 @@ def _load_vault_tools_for_import(args: argparse.Namespace) -> tuple[dict, dict]:
 
 def handle_list(args: argparse.Namespace) -> int:
     """Handle the art list command (vault-side listing)."""
-    vault_identifier = getattr(args, "vault", None)
-    if vault_identifier:
-        vault_path_str = get_vault_by_name_or_path(vault_identifier)
-        if vault_path_str is None:
-            print(f"Error: Vault not in catalog: {vault_identifier}", file=sys.stderr)
-            return 1
-    else:
+    has_vault_flag = getattr(args, "vaults", None) is not None
+    vault_paths = _resolve_vault_paths(args)
+    if not vault_paths:
+        if has_vault_flag:
+            # User specified -V but none resolved
+            print("No artifacts found in vault.")
+            return 0
         vault_path_str = get_default_vault()
         if vault_path_str is None:
             print("Error: No default vault set. Use 'art vault add' or 'art vault init' to set up a vault.", file=sys.stderr)
             return 1
+        vault_paths = [Path(vault_path_str)]
 
-    vault_path = Path(vault_path_str)
-    artifacts = discover_vault_artifacts(vault_path)
-
+    multi_vault = len(vault_paths) > 1
     type_filters = resolve_type_filters(args)
-    if type_filters:
-        artifacts = _apply_type_filters(artifacts, type_filters)
 
-    if not artifacts:
+    all_rows: list[tuple] = []
+    vault_info = list_vaults()
+    for vault_path in vault_paths:
+        artifacts = discover_vault_artifacts(vault_path)
+        if type_filters:
+            artifacts = _apply_type_filters(artifacts, type_filters)
+
+        vault_label = vault_info["vault_names"].get(str(vault_path), vault_path.name)
+        for art in artifacts:
+            description = extract_description(art)
+            if multi_vault:
+                all_rows.append((art["name"], art["type"], description, vault_label))
+            else:
+                all_rows.append((art["name"], art["type"], description))
+
+    if not all_rows:
         print("No artifacts found in vault.")
         return 0
 
-    rows = []
-    for art in artifacts:
-        description = extract_description(art)
-        rows.append((art["name"], art["type"], description))
+    if multi_vault:
+        headers = ("NAME", "TYPE", "DESCRIPTION", "VAULT")
+    else:
+        headers = ("NAME", "TYPE", "DESCRIPTION")
 
-    headers = ("NAME", "TYPE", "DESCRIPTION")
     widths = [len(h) for h in headers]
-    for row in rows:
+    for row in all_rows:
         for i, val in enumerate(row):
             widths[i] = max(widths[i], len(val))
 
     fmt = "  ".join(f"{{:<{w}}}" for w in widths)
     print(fmt.format(*headers))
-    for row in rows:
+    for row in all_rows:
         print(fmt.format(*row))
 
     return 0
@@ -879,7 +945,12 @@ def handle_proj_import(args: argparse.Namespace) -> int:
                 print("Aborted.")
                 return 0
 
-    _load_vault_tools_for_import(args)
+    vault_paths = _resolve_vault_paths(args)
+    if not vault_paths:
+        # Fall back to default vault behavior (let import_artifacts handle it)
+        vault_paths_strs: list[str | None] = [None]
+    else:
+        vault_paths_strs = [str(vp) for vp in vault_paths]
 
     tools_list: list[str]
     if args.tools:
@@ -892,28 +963,34 @@ def handle_proj_import(args: argparse.Namespace) -> int:
         artifacts_list = [a.strip() for a in args.artifacts.split(",")]
 
     type_filters = resolve_type_filters(args)
+    link = getattr(args, "link", False)
 
-    try:
-        result = import_artifacts(
-            target=target,
-            vault=getattr(args, "vault", None),
-            tools=tools_list,
-            link=getattr(args, "link", False),
-            artifacts=artifacts_list,
-            force=force,
-            no_exclude=no_exclude,
-            type_filters=type_filters,
-        )
-    finally:
-        reload_registry()
+    any_failure = False
+    for vault_str in vault_paths_strs:
+        _load_vault_tools_for_import(args, vault_path_str=vault_str)
+        try:
+            result = import_artifacts(
+                target=target,
+                vault=vault_str,
+                tools=tools_list,
+                link=link,
+                artifacts=artifacts_list,
+                force=force,
+                no_exclude=no_exclude,
+                type_filters=type_filters,
+            )
+        finally:
+            reload_registry()
 
-    if not result["success"]:
-        for error in result["errors"]:
-            print(error, file=sys.stderr)
-        return 1
+        if not result["success"]:
+            for error in result["errors"]:
+                print(error, file=sys.stderr)
+            any_failure = True
+            continue
 
-    print_import_summary(result)
-    return 0
+        print_import_summary(result, link=link)
+
+    return 1 if any_failure else 0
 
 
 def handle_proj_rm(args: argparse.Namespace) -> int:
@@ -926,9 +1003,12 @@ def handle_proj_rm(args: argparse.Namespace) -> int:
         tools_filter = [t.strip() for t in args.tools.split(",")]
 
     type_filters = resolve_type_filters(args)
+    vault_labels = _resolve_vault_labels_for_filter(args)
 
     # Load cache to find artifact locations
     cache = _load_cache_entries(target_path)
+    if vault_labels:
+        cache = [e for e in cache if e["vault"] in vault_labels]
     if not cache:
         print("No imported artifacts found.", file=sys.stderr)
         return 1
@@ -988,8 +1068,11 @@ def handle_proj_wipe(args: argparse.Namespace) -> int:
         tools_filter = [t.strip() for t in args.tools.split(",")]
 
     type_filters = resolve_type_filters(args)
+    vault_labels = _resolve_vault_labels_for_filter(args)
 
     cache = _load_cache_entries(target_path)
+    if vault_labels:
+        cache = [e for e in cache if e["vault"] in vault_labels]
     if not cache:
         print("No imported artifacts found.")
         return 0
@@ -1044,6 +1127,7 @@ def handle_proj_list(args: argparse.Namespace) -> int:
         tools_filter = [t.strip() for t in args.tools.split(",")]
 
     type_filters = resolve_type_filters(args)
+    vault_labels = _resolve_vault_labels_for_filter(args)
 
     cache = _load_cache_entries(target_path)
     if not cache:
@@ -1052,19 +1136,26 @@ def handle_proj_list(args: argparse.Namespace) -> int:
 
     rows = []
     for entry in cache:
-        # Apply tool filter
         if tools_filter and entry["tool"] not in tools_filter:
             continue
-        # Apply type filter
         if type_filters and entry["type_plural"] not in type_filters:
             continue
-        rows.append((entry["name"], entry["type"], entry["tool"], entry["vault"]))
+        if vault_labels and entry["vault"] not in vault_labels:
+            continue
+        arrow = ""
+        link_state = entry.get("link_state", "")
+        if link_state == "linked":
+            arrow = " \u2192"
+        elif link_state in ("hardlinked", "win_hardlinked"):
+            arrow = " \u21d2"
+        state_col = link_state if link_state else "copied"
+        rows.append((entry["name"] + arrow, entry["type"], entry["tool"], entry["vault"], state_col))
 
     if not rows:
         print("No matching imported artifacts found.")
         return 0
 
-    headers = ("NAME", "TYPE", "TOOL", "VAULT")
+    headers = ("NAME", "TYPE", "TOOL", "VAULT", "STATE")
     widths = [len(h) for h in headers]
     for row in rows:
         for i, val in enumerate(row):
@@ -1082,7 +1173,11 @@ def handle_conf_import(args: argparse.Namespace) -> int:
     """Handle the conf import command."""
     from .tools import reload_registry
 
-    _load_vault_tools_for_import(args)
+    vault_paths = _resolve_vault_paths(args)
+    if not vault_paths:
+        vault_paths_strs: list[str | None] = [None]
+    else:
+        vault_paths_strs = [str(vp) for vp in vault_paths]
 
     tools_list: list[str]
     if args.tools:
@@ -1095,26 +1190,32 @@ def handle_conf_import(args: argparse.Namespace) -> int:
         artifacts_list = [a.strip() for a in args.artifacts.split(",")]
 
     type_filters = resolve_type_filters(args)
+    link = getattr(args, "link", False)
 
-    try:
-        result = import_artifacts_global(
-            vault=getattr(args, "vault", None),
-            tools=tools_list,
-            link=getattr(args, "link", False),
-            artifacts=artifacts_list,
-            force=getattr(args, "force", False),
-            type_filters=type_filters,
-        )
-    finally:
-        reload_registry()
+    any_failure = False
+    for vault_str in vault_paths_strs:
+        _load_vault_tools_for_import(args, vault_path_str=vault_str)
+        try:
+            result = import_artifacts_global(
+                vault=vault_str,
+                tools=tools_list,
+                link=link,
+                artifacts=artifacts_list,
+                force=getattr(args, "force", False),
+                type_filters=type_filters,
+            )
+        finally:
+            reload_registry()
 
-    if not result["success"]:
-        for error in result["errors"]:
-            print(error, file=sys.stderr)
-        return 1
+        if not result["success"]:
+            for error in result["errors"]:
+                print(error, file=sys.stderr)
+            any_failure = True
+            continue
 
-    print_import_summary(result)
-    return 0
+        print_import_summary(result, link=link)
+
+    return 1 if any_failure else 0
 
 
 def handle_conf_rm(args: argparse.Namespace) -> int:
@@ -1126,8 +1227,11 @@ def handle_conf_rm(args: argparse.Namespace) -> int:
         tools_filter = [t.strip() for t in args.tools.split(",")]
 
     type_filters = resolve_type_filters(args)
+    vault_labels = _resolve_vault_labels_for_filter(args)
 
     cache = _load_global_cache_entries()
+    if vault_labels:
+        cache = [e for e in cache if e["vault"] in vault_labels]
     if not cache:
         print("No globally imported artifacts found.", file=sys.stderr)
         return 1
@@ -1185,8 +1289,11 @@ def handle_conf_wipe(args: argparse.Namespace) -> int:
         tools_filter = [t.strip() for t in args.tools.split(",")]
 
     type_filters = resolve_type_filters(args)
+    vault_labels = _resolve_vault_labels_for_filter(args)
 
     cache = _load_global_cache_entries()
+    if vault_labels:
+        cache = [e for e in cache if e["vault"] in vault_labels]
     if not cache:
         print("No globally imported artifacts found.")
         return 0
@@ -1261,6 +1368,7 @@ def handle_conf_list(args: argparse.Namespace) -> int:
         tools_filter = [t.strip() for t in args.tools.split(",")]
 
     type_filters = resolve_type_filters(args)
+    vault_labels = _resolve_vault_labels_for_filter(args)
 
     cache = _load_global_cache_entries()
     if not cache:
@@ -1273,13 +1381,22 @@ def handle_conf_list(args: argparse.Namespace) -> int:
             continue
         if type_filters and entry["type_plural"] not in type_filters:
             continue
-        rows.append((entry["name"], entry["type"], entry["tool"], entry["vault"]))
+        if vault_labels and entry["vault"] not in vault_labels:
+            continue
+        arrow = ""
+        link_state = entry.get("link_state", "")
+        if link_state == "linked":
+            arrow = " \u2192"
+        elif link_state in ("hardlinked", "win_hardlinked"):
+            arrow = " \u21d2"
+        state_col = link_state if link_state else "copied"
+        rows.append((entry["name"] + arrow, entry["type"], entry["tool"], entry["vault"], state_col))
 
     if not rows:
         print("No matching imported artifacts found.")
         return 0
 
-    headers = ("NAME", "TYPE", "TOOL", "VAULT")
+    headers = ("NAME", "TYPE", "TOOL", "VAULT", "STATE")
     widths = [len(h) for h in headers]
     for row in rows:
         for i, val in enumerate(row):
@@ -1291,6 +1408,59 @@ def handle_conf_list(args: argparse.Namespace) -> int:
         print(fmt.format(*row))
 
     return 0
+
+
+def _resolve_vault_paths(args: argparse.Namespace) -> list[Path]:
+    """Resolve vault paths from repeatable/comma-separated `-V` flags.
+
+    Returns:
+        List of resolved vault Paths.
+    """
+    raw_vaults = getattr(args, "vaults", None)
+    if raw_vaults:
+        paths = []
+        for v in raw_vaults:
+            for part in v.split(","):
+                part = part.strip()
+                if part:
+                    resolved = get_vault_by_name_or_path(part)
+                    if resolved:
+                        paths.append(Path(resolved))
+                    else:
+                        print(f"Warning: Vault not found: {part}", file=sys.stderr)
+        return paths
+
+    # Default: use the default vault
+    default_vault = get_default_vault()
+    if default_vault:
+        return [Path(default_vault)]
+
+    return []
+
+
+def _resolve_vault_labels_for_filter(args: argparse.Namespace) -> list[str] | None:
+    """Resolve vault labels from -V flags for cache entry filtering.
+
+    Returns:
+        List of vault labels to filter by, or None if no filter specified.
+    """
+    raw_vaults = getattr(args, "vaults", None)
+    if not raw_vaults:
+        return None
+
+    labels = []
+    for v in raw_vaults:
+        for part in v.split(","):
+            part = part.strip()
+            if part:
+                resolved_path = get_vault_by_name_or_path(part)
+                if resolved_path:
+                    info = list_vaults()
+                    vault_name = info["vault_names"].get(resolved_path)
+                    labels.append(vault_name if vault_name else Path(resolved_path).name)
+                else:
+                    labels.append(part)
+    return labels if labels else None
 
 
 def _resolve_vault_scope(args: argparse.Namespace) -> list[str]:
@@ -1522,10 +1692,11 @@ def _load_cache_entries(target: Path) -> list[dict]:
         if current_section == "vault_paths":
             continue
 
-        # Strip :suffix if present
+        # Preserve :suffix as link_state instead of stripping
         entry = line
+        link_state = ""
         if ":" in entry:
-            entry = entry.rsplit(":", 1)[0]
+            entry, link_state = entry.rsplit(":", 1)
 
         parts = entry.split(".")
         if len(parts) < 3:
@@ -1545,6 +1716,7 @@ def _load_cache_entries(target: Path) -> list[dict]:
             "vault": vault_name,
             "type": art_type,
             "type_plural": art_type_plural,
+            "link_state": link_state,
             "raw": line,
         })
 
@@ -1584,10 +1756,11 @@ def _load_global_cache_entries() -> list[dict]:
         if current_section == "vault_paths":
             continue
 
-        # Strip :suffix if present
+        # Preserve :suffix as link_state instead of stripping
         entry = line
+        link_state = ""
         if ":" in entry:
-            entry = entry.rsplit(":", 1)[0]
+            entry, link_state = entry.rsplit(":", 1)
 
         parts = entry.split(".")
         if len(parts) < 3:
@@ -1606,6 +1779,7 @@ def _load_global_cache_entries() -> list[dict]:
             "vault": vault_name,
             "type": art_type,
             "type_plural": art_type_plural,
+            "link_state": link_state,
             "raw": line,
         })
 
@@ -1889,10 +2063,11 @@ def _find_all_global_artifacts(
     return results
 
 
-def print_import_summary(result: dict[str, Any]) -> None:
+def print_import_summary(result: dict[str, Any], link: bool = False) -> None:
     """Print a summary of the import operation."""
     imported = result["imported"]
     skipped = result["skipped"]
+    link_label = " (linked)" if link else " (copied)" if link is not None else ""
 
     total_imported = 0
     for tool_name, counts in imported.items():
@@ -1901,7 +2076,7 @@ def print_import_summary(result: dict[str, Any]) -> None:
             print(f"\n{tool_name}:")
             for artifact_type, count in counts.items():
                 if count > 0:
-                    print(f"  {artifact_type}: {count}")
+                    print(f"  {artifact_type}: {count}{link_label}")
                     total_imported += count
 
     if total_imported == 0:
@@ -2105,17 +2280,33 @@ def handle_tool_select(args: argparse.Namespace) -> int:
 
 def handle_tool_list(args: argparse.Namespace) -> int:
     """Handle the tool list command."""
+    show_all = getattr(args, "show_all", False)
+    vault_paths = _resolve_vault_paths(args)
+
+    if show_all and vault_paths and getattr(args, "vaults", None):
+        print("Error: --all and -V are mutually exclusive.", file=sys.stderr)
+        return 1
+
     global_tools = load_global_tools()
 
-    vault_identifier = getattr(args, "vault", None)
-    if vault_identifier:
-        vault_path = get_vault_by_name_or_path(vault_identifier)
-        if vault_path is None:
-            print(f"Error: Vault not found: {vault_identifier}", file=sys.stderr)
-            return 1
-        meta = load_vault_metadata(vault_path)
-        vault_tools = meta.get("tools", {})
-        vault_name = meta.get("name")
+    if show_all:
+        # List tools from all catalog vaults + global config
+        all_vault_data = load_all_vault_tools()
+        # Aggregate all vault tools
+        combined_vault_tools: dict[str, dict] = {}
+        for _vname, _vpath, vtools in all_vault_data:
+            combined_vault_tools.update(vtools)
+        vault_tools = combined_vault_tools
+        vault_name = None
+    elif vault_paths and getattr(args, "vaults", None):
+        # Multi-vault: aggregate tools from specified vaults
+        combined_vault_tools = {}
+        for vp in vault_paths:
+            meta = load_vault_metadata(str(vp))
+            vt = meta.get("tools", {})
+            combined_vault_tools.update(vt)
+        vault_tools = combined_vault_tools
+        vault_name = None
     else:
         vault_tools, vault_name = load_active_vault_tools()
 
@@ -2182,25 +2373,23 @@ def handle_tool_add(args: argparse.Namespace) -> int:
         )
         return 1
 
-    vault_identifier = getattr(args, "vault", None)
+    has_vault_flag = getattr(args, "vaults", None) is not None
+    vault_paths = _resolve_vault_paths(args) if has_vault_flag else []
 
-    if vault_identifier:
-        # Store in vault's vault.yaml
-        vault_path = get_vault_by_name_or_path(vault_identifier)
-        if vault_path is None:
-            print(f"Error: Vault not found: {vault_identifier}", file=sys.stderr)
-            return 1
+    if vault_paths:
+        # Store in vault(s)' vault.yaml
+        for vault_path in vault_paths:
+            vault_path_str = str(vault_path)
+            meta = load_vault_metadata(vault_path_str)
+            if tool_name in meta.get("tools", {}):
+                print(f"Error: Tool '{tool_name}' already exists in vault '{vault_path.name}'.", file=sys.stderr)
+                return 1
 
-        meta = load_vault_metadata(vault_path)
-        if tool_name in meta.get("tools", {}):
-            print(f"Error: Tool '{tool_name}' already exists in vault.", file=sys.stderr)
-            return 1
-
-        if "tools" not in meta or meta["tools"] is None:
-            meta["tools"] = {}
-        meta["tools"][tool_name] = tool_def
-        save_vault_metadata(vault_path, meta)
-        print(f"Added tool '{tool_name}' to vault.")
+            if "tools" not in meta or meta["tools"] is None:
+                meta["tools"] = {}
+            meta["tools"][tool_name] = tool_def
+            save_vault_metadata(vault_path_str, meta)
+            print(f"Added tool '{tool_name}' to vault '{vault_path.name}'.")
     else:
         # Store in global config
         global_tools = load_global_tools()
@@ -2262,8 +2451,15 @@ def handle_tool_rm(args: argparse.Namespace) -> int:
 def handle_tool_info(args: argparse.Namespace) -> int:
     """Handle the tool info command."""
     tool_name = getattr(args, "name", None)
-    vault_flag = getattr(args, "vault", None)
     global_filter = getattr(args, "global_filter", False)
+    show_all = getattr(args, "show_all", False)
+
+    vault_paths = _resolve_vault_paths(args)
+    has_vault_flag = getattr(args, "vaults", None) is not None
+
+    if show_all and has_vault_flag:
+        print("Error: --all and -V are mutually exclusive.", file=sys.stderr)
+        return 1
 
     global_tools = load_global_tools()
     default_vault_tools, default_vault_name = load_active_vault_tools()
@@ -2272,24 +2468,50 @@ def handle_tool_info(args: argparse.Namespace) -> int:
     cwd_tools = load_cwd_vault_tools()
 
     # Resolve vault filter
+    filter_vault_paths: list[str] = []
+    if show_all:
+        # --all: show everything, no filtering
+        pass
+    elif has_vault_flag:
+        filter_vault_paths = [str(vp) for vp in vault_paths]
+
+    # For backward compat with _tool_info_catalog/_tool_info_detail, use single filter_vault_path
+    # when only one vault is specified; for multiple, we iterate
     filter_vault_path: str | None = None
     filter_vault_name: str | None = None
-    if vault_flag is True:
-        # --vault with no value → default vault
-        if default_vault_path is None:
-            print("Error: No default vault configured.", file=sys.stderr)
-            return 1
-        filter_vault_path = default_vault_path
-        filter_vault_name = default_vault_name
-    elif vault_flag is not None:
-        # --vault=X → specific vault
-        resolved_path = get_vault_by_name_or_path(vault_flag)
-        if resolved_path is None:
-            print(f"Error: Vault not found: {vault_flag}", file=sys.stderr)
-            return 1
-        filter_vault_path = resolved_path
-        meta = load_vault_metadata(resolved_path)
+    if len(filter_vault_paths) == 1:
+        filter_vault_path = filter_vault_paths[0]
+        meta = load_vault_metadata(filter_vault_path)
         filter_vault_name = meta.get("name")
+    elif len(filter_vault_paths) > 1:
+        # For multi-vault filter, show each vault's tools
+        for fvp in filter_vault_paths:
+            meta = load_vault_metadata(fvp)
+            fvn = meta.get("name")
+            if tool_name is None:
+                _tool_info_catalog(
+                    global_tools=global_tools,
+                    all_vault_data=all_vault_data,
+                    cwd_tools=cwd_tools,
+                    default_vault_path=default_vault_path,
+                    global_filter=False,
+                    filter_vault_path=fvp,
+                    filter_vault_name=fvn,
+                )
+            else:
+                _tool_info_detail(
+                    tool_name=tool_name,
+                    global_tools=global_tools,
+                    default_vault_tools=default_vault_tools,
+                    default_vault_name=default_vault_name,
+                    default_vault_path=default_vault_path,
+                    all_vault_data=all_vault_data,
+                    cwd_tools=cwd_tools,
+                    global_filter=False,
+                    filter_vault_path=fvp,
+                    filter_vault_name=fvn,
+                )
+        return 0
 
     if tool_name is None:
         return _tool_info_catalog(
@@ -2714,22 +2936,13 @@ def handle_store(args: argparse.Namespace) -> int:
         print("Error: Either a target directory or --global is required.", file=sys.stderr)
         return 1
 
-    vault_identifier = getattr(args, "vault", None)
-    if vault_identifier:
-        vault_path_str = get_vault_by_name_or_path(vault_identifier)
-        if vault_path_str is None:
-            print(f"Error: Vault not in catalog: {vault_identifier}", file=sys.stderr)
-            return 1
-    else:
+    vault_paths = _resolve_vault_paths(args)
+    if not vault_paths:
         vault_path_str = get_default_vault()
         if vault_path_str is None:
             print("Error: No default vault set. Use 'art vault add' or 'art vault init' to set up a vault.", file=sys.stderr)
             return 1
-
-    vault_path = Path(vault_path_str)
-
-    vault_info = list_vaults()
-    vault_display_name = vault_info["vault_names"].get(vault_path_str, vault_path.name)
+        vault_paths = [Path(vault_path_str)]
 
     if global_store:
         tools_filter = None
@@ -2774,28 +2987,32 @@ def handle_store(args: argparse.Namespace) -> int:
     if not indices:
         return 0
 
-    stored_count = 0
-    for idx in indices:
-        art = artifacts[idx]
-        source_path = art["path"]
-        dest = vault_path / art["type_plural"] / (source_path.name if art["type"] == "skill" else source_path.name)
+    vault_info = list_vaults()
+    for vault_path in vault_paths:
+        vault_display_name = vault_info["vault_names"].get(str(vault_path), vault_path.name)
+        stored_count = 0
+        for idx in indices:
+            art = artifacts[idx]
+            source_path = art["path"]
+            dest = vault_path / art["type_plural"] / (source_path.name if art["type"] == "skill" else source_path.name)
 
-        # Skip if source is a symlink pointing to the target vault
-        if source_path.is_symlink():
-            try:
-                resolved = source_path.resolve()
-                if str(resolved).startswith(str(vault_path.resolve())):
-                    print(f"Skipping '{art['name']}': already linked to this vault")
-                    continue
-            except OSError:
-                pass
+            # Skip if source is a symlink pointing to the target vault
+            if source_path.is_symlink():
+                try:
+                    resolved = source_path.resolve()
+                    if str(resolved).startswith(str(vault_path.resolve())):
+                        print(f"Skipping '{art['name']}': already linked to this vault")
+                        continue
+                except OSError:
+                    pass
 
-        result = copy_with_prompt(source_path, dest, force=force)
-        if result["copied"] > 0:
-            print(f"Stored: {art['name']} ({art['type']}) -> {dest}")
-            stored_count += 1
+            result = copy_with_prompt(source_path, dest, force=force)
+            if result["copied"] > 0:
+                print(f"Stored: {art['name']} ({art['type']}) -> {dest}")
+                stored_count += 1
 
-    print(f"\n{stored_count} artifact(s) stored to vault: {vault_display_name}")
+        print(f"\n{stored_count} artifact(s) stored to vault: {vault_display_name}")
+
     return 0
 
 
@@ -2887,12 +3104,21 @@ def handle_create_artifact(args: argparse.Namespace, artifact_type: str) -> int:
 
         targets = resolution["paths"]
     else:
-        resolution = resolve_vault_target(artifact_name, artifact_type=artifact_type, vault=vault)
-        if not resolution["success"]:
-            print(f"Error: {resolution['error']}", file=sys.stderr)
-            return 1
-
-        targets = [resolution["path"]]
+        vault_paths = _resolve_vault_paths(args)
+        if not vault_paths:
+            resolution = resolve_vault_target(artifact_name, artifact_type=artifact_type, vault=None)
+            if not resolution["success"]:
+                print(f"Error: {resolution['error']}", file=sys.stderr)
+                return 1
+            targets = [resolution["path"]]
+        else:
+            targets = []
+            for vp in vault_paths:
+                resolution = resolve_vault_target(artifact_name, artifact_type=artifact_type, vault=str(vp))
+                if not resolution["success"]:
+                    print(f"Error: {resolution['error']}", file=sys.stderr)
+                    return 1
+                targets.append(resolution["path"])
 
     for target_path in targets:
         result = create_artifact(

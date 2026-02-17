@@ -195,3 +195,44 @@ The `config` namespace MUST expose an `edit` subcommand.
 #### Scenario: No vault flag on unlink (default)
 - **WHEN** `art conf unlink -a` is run without `--vault`
 - **THEN** the operation MUST be scoped to the currently selected default vault
+
+### Requirement: Config list vault filter
+`art conf ls` MUST support `-V`/`--vault` to filter listed artifacts by vault.
+
+#### Scenario: List with single vault filter
+- **WHEN** `art conf ls -V favorites` is run
+- **THEN** only globally imported artifacts from `favorites` MUST be displayed
+
+#### Scenario: List with multiple vault filter
+- **WHEN** `art conf ls -V vault1,vault2` is run
+- **THEN** only globally imported artifacts from `vault1` or `vault2` MUST be displayed
+
+#### Scenario: List without vault filter
+- **WHEN** `art conf ls` is run without `-V`
+- **THEN** artifacts from all vaults MUST be displayed (existing behavior)
+
+### Requirement: Config rm vault filter
+`art conf rm` MUST support `-V`/`--vault` to scope removal by vault.
+
+#### Scenario: Remove with vault filter
+- **WHEN** `art conf rm foo -V favorites` is run
+- **THEN** only the globally imported artifact named `foo` from `favorites` MUST be removed
+
+#### Scenario: Remove with multiple vault filter
+- **WHEN** `art conf rm foo -V vault1,vault2` is run
+- **THEN** the artifact named `foo` from either `vault1` or `vault2` MUST be removed
+
+### Requirement: Config wipe vault filter
+`art conf wipe` MUST support `-V`/`--vault` to scope wipe by vault.
+
+#### Scenario: Wipe with vault filter
+- **WHEN** `art conf wipe -V favorites` is run
+- **THEN** only globally imported artifacts from `favorites` MUST be removed
+
+#### Scenario: Wipe with multiple vault filter
+- **WHEN** `art conf wipe -V vault1,vault2` is run
+- **THEN** only globally imported artifacts from `vault1` or `vault2` MUST be removed
+
+#### Scenario: Wipe without vault filter
+- **WHEN** `art conf wipe` is run without `-V`
+- **THEN** all globally imported artifacts MUST be removed (existing behavior)

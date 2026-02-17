@@ -78,7 +78,7 @@ class TestCreateSkillParsing:
         """Verify --vault flag is parsed."""
         parser = create_parser()
         args = parser.parse_args(["create", "skill", "my-skill", "--vault", "favorites"])
-        assert args.vault == "favorites"
+        assert args.vaults == ["favorites"]
 
     def test_tools_flag(self):
         """Verify --tools flag is parsed."""
@@ -95,7 +95,7 @@ class TestCreateSkillParsing:
         assert args.content is None
         assert args.field == []
         assert args.here is False
-        assert args.vault is None
+        assert args.vaults is None
         assert args.tools is None
 
     def test_create_command_registered(self):

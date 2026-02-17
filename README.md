@@ -352,7 +352,10 @@ art proj import
 art proj import ~/repos/my-project
 
 # Import from a specific vault
-art proj import --vault=favorites
+art proj import -V favorites
+
+# Import from multiple vaults
+art proj import -V vault1,vault2
 
 # Import for specific tools
 art proj import --tools=claude-code,opencode
@@ -394,7 +397,7 @@ art proj wipe -S -f
 art conf import
 
 # Import from a specific vault
-art conf import --vault=favorites
+art conf import -V favorites
 
 # Import only skills for claude-code
 art conf import --tools=claude-code -S
@@ -414,6 +417,102 @@ art conf wipe -f
 ```
 
 Imported artifacts are tracked in `.art-cache/imported` (project) and `~/.config/artifactr/.art-cache-global/imported` (global), recording which vault and tool each artifact came from.
+
+### Linking & Unlinking Artifacts
+
+Replace imported copies with symlinks pointing to vault sources, or convert symlinks back to copies:
+
+```sh
+# Link specific artifacts in current project
+art proj link my-skill
+
+# Link all imported artifacts
+art proj link --all
+
+# Link with auto-backup on diff (no prompts)
+art proj link --all --force
+
+# Link only artifacts from a specific vault
+art proj link --all -V favorites
+
+# Unlink (replace symlinks with copies)
+art proj unlink my-skill
+art proj unlink --all
+
+# Same for global config artifacts
+art conf link --all
+art conf unlink my-skill
+```
+
+### Import with Linking
+
+Use `--link` to create symlinks instead of copies during import. The import summary shows the link state:
+
+```sh
+art proj import --link
+# Output:
+# claude-code:
+#   skills: 3 (linked)
+#   commands: 1 (linked)
+
+art proj import
+# Output:
+# claude-code:
+#   skills: 3 (copied)
+```
+
+### Multi-Vault `-V` Flag
+
+Most commands support targeting multiple vaults with `-V`. Values can be comma-separated or the flag can be repeated:
+
+```sh
+# Import from multiple vaults
+art proj import -V vault1,vault2
+art proj import -V vault1 -V vault2   # equivalent
+
+# List artifacts from multiple vaults (adds VAULT column)
+art ls -V vault1,vault2
+
+# Store into multiple vaults
+art store ./dir -V vault1,vault2
+
+# Create in multiple vaults
+art create skill my-skill -d "desc" -V vault1,vault2
+
+# Filter project/config lists by vault
+art proj ls -V favorites
+art conf ls -V vault1,vault2
+
+# Filter removal by vault
+art proj rm my-skill -V favorites
+art proj wipe -V favorites
+```
+
+### Tool Discovery with `--all`
+
+```sh
+# List tools from all catalog vaults and global config
+art tool ls --all
+
+# Show all tool definitions from all sources
+art tool info --all
+
+# --all and -V are mutually exclusive
+art tool ls --all -V favorites  # Error
+```
+
+### Link State Display
+
+`art proj ls` and `art conf ls` display a STATE column showing whether each artifact is linked or copied:
+
+```
+NAME               TYPE      TOOL         VAULT       STATE
+helping-hand  →    skill     claude-code  favorites   linked
+code-review        skill     claude-code  favorites   copied
+deploy-prod   ⇒    command   opencode     favorites   hardlinked
+```
+
+Arrow indicators: `→` = symlinked, `⇒` = hardlinked. Legacy entries (no suffix) display as `copied`.
 
 ### Creating Artifacts
 

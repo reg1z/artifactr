@@ -84,7 +84,7 @@ Path values containing `$HOME`, `~`, or other environment variables MUST be expa
 - **THEN** `~` MUST be expanded to the user's home directory
 
 ### Requirement: art tool add command
-The `art tool add <name>` command MUST create a custom tool definition and store it in either the user global config or a vault's metadata file.
+The `art tool add <name>` command MUST create a custom tool definition and store it in either the user global config or a vault's metadata file. Multi-vault `-V` is supported to add to multiple vaults.
 
 #### Scenario: Add tool to global config
 - **WHEN** `art tool add my-tool --skills .my-tool/skills` is run (no `--vault` flag)
@@ -97,6 +97,18 @@ The `art tool add <name>` command MUST create a custom tool definition and store
 #### Scenario: Add tool to vault
 - **WHEN** `art tool add my-tool --skills .my-tool/skills --vault=team-vault` is run
 - **THEN** the tool definition MUST be saved to the vault's `vault.yaml` under `tools:`
+
+#### Scenario: Add to single vault
+- **WHEN** `art tool add <criteria> -V favorites` is run
+- **THEN** the tool definition MUST be added to `favorites` vault.yaml
+
+#### Scenario: Add to multiple vaults
+- **WHEN** `art tool add <criteria> -V vault1,vault2` is run
+- **THEN** the tool definition MUST be added to the vault.yaml of both `vault1` and `vault2`
+
+#### Scenario: Add without vault flag
+- **WHEN** `art tool add <criteria>` is run without `-V`
+- **THEN** the tool definition MUST be added to the global config (existing behavior)
 
 #### Scenario: Add tool with all paths
 - **WHEN** `art tool add my-tool --skills .t/skills --commands .t/commands --agents .t/agents --global-skills '$HOME/.t/skills' --global-commands '$HOME/.t/commands' --global-agents '$HOME/.t/agents'` is run
@@ -171,8 +183,31 @@ A `load_all_vault_tools()` function MUST be provided that iterates all registere
 - **WHEN** no vaults are registered
 - **THEN** `load_all_vault_tools()` MUST return an empty list
 
+### Requirement: Tool list command
+`art tool ls` MUST support multi-vault `-V` and an `--all` flag.
+
+#### Scenario: List from single vault
+- **WHEN** `art tool ls -V favorites` is run
+- **THEN** tools from `favorites` MUST be listed
+
+#### Scenario: List from multiple vaults
+- **WHEN** `art tool ls -V vault1,vault2` is run
+- **THEN** tools from both vaults MUST be listed
+
+#### Scenario: List all catalog vaults
+- **WHEN** `art tool ls --all` or `art tool ls -a` is run
+- **THEN** tools from all catalog vaults and global config MUST be listed
+
+#### Scenario: All flag mutually exclusive with vault
+- **WHEN** `art tool ls --all -V favorites` is run
+- **THEN** an error MUST be displayed
+
+#### Scenario: List without flags
+- **WHEN** `art tool ls` is run without `-V` or `--all`
+- **THEN** tools from the default vault MUST be listed (existing behavior)
+
 ### Requirement: art tool info command
-The `art tool info` command MUST display tool definitions with support for catalog view (no name), detail view (with name), and source filtering (`--vault`, `--global`).
+The `art tool info` command MUST display tool definitions with support for catalog view (no name), detail view (with name), source filtering (`--vault`, `--global`), multi-vault `-V`, and an `--all` flag.
 
 #### Scenario: Catalog view with no arguments
 - **WHEN** `art tool info` is run with no arguments and no flags
@@ -205,3 +240,23 @@ The `art tool info` command MUST display tool definitions with support for catal
 #### Scenario: Filter returns no results
 - **WHEN** a filter flag is used and the specified source has no tool definitions (or no definition for the given name)
 - **THEN** a message MUST be displayed indicating no tools were found in that source
+
+#### Scenario: Info from single vault
+- **WHEN** `art tool info -V favorites` is run
+- **THEN** tool info from `favorites` MUST be shown
+
+#### Scenario: Info from multiple vaults
+- **WHEN** `art tool info -V vault1,vault2` is run
+- **THEN** tool info from both vaults MUST be shown
+
+#### Scenario: Info all sources
+- **WHEN** `art tool info --all` or `art tool info -a` is run
+- **THEN** tool definitions from built-in, global config, and every catalog vault MUST be shown
+
+#### Scenario: All flag mutually exclusive with vault
+- **WHEN** `art tool info --all -V favorites` is run
+- **THEN** an error MUST be displayed
+
+#### Scenario: Info without flags
+- **WHEN** `art tool info` is run without `-V` or `--all`
+- **THEN** tool info from the default vault MUST be shown (existing behavior)

@@ -1,8 +1,4 @@
-## Purpose
-
-Import functionality has been restructured. The top-level `art import` command has been removed. Project-side import is now `art proj import` (see `project-commands` spec). Global config import is now `art conf import` (see `config-commands` spec).
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Project import vault selection
 `art proj import` MUST support multi-vault `-V` to import from multiple vaults.

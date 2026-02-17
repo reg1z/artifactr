@@ -260,7 +260,7 @@ class TestHandleList:
     def test_list_artifacts(self, make_vault, capsys):
         vault = make_vault()
         args = argparse.Namespace(
-            vault=None, skills=None, commands=None, agents=None
+            vaults=None, skills=None, commands=None, agents=None
         )
         with mock.patch(
             "artifactr.cli.get_default_vault", return_value=str(vault)
@@ -313,7 +313,7 @@ class TestHandleList:
         (vault / "vault.yaml").write_text("name: empty\n")
 
         args = argparse.Namespace(
-            vault=None, skills=None, commands=None, agents=None
+            vaults=None, skills=None, commands=None, agents=None
         )
         with mock.patch(
             "artifactr.cli.get_default_vault", return_value=str(vault)
@@ -326,7 +326,7 @@ class TestHandleList:
 
     def test_list_no_default_vault(self, capsys):
         args = argparse.Namespace(
-            vault=None, skills=None, commands=None, agents=None
+            vaults=None, skills=None, commands=None, agents=None
         )
         with mock.patch(
             "artifactr.cli.get_default_vault", return_value=None
@@ -340,11 +340,14 @@ class TestHandleList:
     def test_list_with_vault_arg(self, make_vault, capsys):
         vault = make_vault()
         args = argparse.Namespace(
-            vault="myvault", skills=None, commands=None, agents=None
+            vaults=["myvault"], skills=None, commands=None, agents=None
         )
         with mock.patch(
             "artifactr.cli.get_vault_by_name_or_path",
             return_value=str(vault),
+        ), mock.patch(
+            "artifactr.cli.list_vaults",
+            return_value={"vaults": [str(vault)], "default": str(vault), "vault_names": {str(vault): "myvault"}},
         ):
             rc = handle_list(args)
 
@@ -354,16 +357,16 @@ class TestHandleList:
 
     def test_list_vault_not_in_catalog(self, capsys):
         args = argparse.Namespace(
-            vault="nonexistent", skills=None, commands=None, agents=None
+            vaults=["nonexistent"], skills=None, commands=None, agents=None
         )
         with mock.patch(
             "artifactr.cli.get_vault_by_name_or_path", return_value=None
         ):
             rc = handle_list(args)
 
-        assert rc == 1
-        err = capsys.readouterr().err
-        assert "not in catalog" in err
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "No artifacts found" in out
 
 
 # ---------------------------------------------------------------------------
@@ -1582,7 +1585,7 @@ class TestCreateParser:
             "--force",
         ])
         assert ns.target == "/my/project"
-        assert ns.vault == "myvault"
+        assert ns.vaults == ["myvault"]
         assert ns.tools == "claude-code"
         assert ns.no_exclude is True
         assert ns.skills is True
@@ -1621,7 +1624,7 @@ class TestCreateParser:
         ns = parser.parse_args(["conf", "import", "--vault", "v", "-S"])
         assert ns.command == "conf"
         assert ns.conf_command == "import"
-        assert ns.vault == "v"
+        assert ns.vaults == ["v"]
         assert ns.skills is True
 
     def test_conf_rm_command(self):
@@ -2027,7 +2030,7 @@ class TestToolAddAliasParsing:
             global_commands=None,
             global_agents=None,
             aliases=["mt,mytool"],
-            vault=None,
+            vaults=None,
             global_config=False,
         )
         with mock.patch("artifactr.cli.load_global_tools", return_value={}), \
@@ -2050,7 +2053,7 @@ class TestToolAddAliasParsing:
             global_commands=None,
             global_agents=None,
             aliases=["mt", "mytool"],
-            vault=None,
+            vaults=None,
             global_config=False,
         )
         with mock.patch("artifactr.cli.load_global_tools", return_value={}), \
@@ -2073,7 +2076,7 @@ class TestToolAddAliasParsing:
             global_commands=None,
             global_agents=None,
             aliases=["mt,mytool", "m"],
-            vault=None,
+            vaults=None,
             global_config=False,
         )
         with mock.patch("artifactr.cli.load_global_tools", return_value={}), \

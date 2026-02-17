@@ -346,19 +346,25 @@ class TestNewAliases:
 
     def test_vault_shorthand_V(self):
         parser = create_parser()
+        # Commands that use multi-vault (vaults as list)
         for cmd_args in [
             ["ls", "-V", "my-vault"],
-            ["rm", "x", "-V", "my-vault"],
             ["store", "./dir", "-V", "my-vault"],
-            ["edit", "skill", "x", "-V", "my-vault"],
             ["create", "skill", "x", "-d", "d", "-V", "my-vault"],
             ["create", "command", "x", "-d", "d", "-V", "my-vault"],
             ["create", "agent", "x", "-d", "d", "-V", "my-vault"],
             ["project", "import", "-V", "my-vault"],
             ["config", "import", "-V", "my-vault"],
             ["tool", "add", "x", "--skills", "s", "-V", "my-vault"],
-            ["tool", "rm", "x", "-V", "my-vault"],
             ["tool", "ls", "-V", "my-vault"],
+        ]:
+            args = parser.parse_args(cmd_args)
+            assert getattr(args, "vaults", None) == ["my-vault"], f"Failed for {cmd_args}"
+        # Commands that use single vault (vault as str)
+        for cmd_args in [
+            ["rm", "x", "-V", "my-vault"],
+            ["edit", "skill", "x", "-V", "my-vault"],
+            ["tool", "rm", "x", "-V", "my-vault"],
         ]:
             args = parser.parse_args(cmd_args)
             assert getattr(args, "vault", None) == "my-vault", f"Failed for {cmd_args}"
