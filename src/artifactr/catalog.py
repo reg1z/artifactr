@@ -11,13 +11,13 @@ from .config import load_config, save_config
 
 
 def _next_auto_name(config: dict[str, Any]) -> str:
-    """Compute the next auto-name using the llm-vault-N pattern."""
+    """Compute the next auto-name using the vault-N pattern."""
     max_n = 0
     for vault_name in config["vault_names"].values():
-        m = re.match(r"^llm-vault-(\d+)$", vault_name)
+        m = re.match(r"^vault-(\d+)$", vault_name)
         if m:
             max_n = max(max_n, int(m.group(1)))
-    return f"llm-vault-{max_n + 1}"
+    return f"vault-{max_n + 1}"
 
 
 def add_vaults(paths: list[str], name: str | None = None) -> dict[str, Any]:
@@ -26,7 +26,7 @@ def add_vaults(paths: list[str], name: str | None = None) -> dict[str, Any]:
     Args:
         paths: List of directory paths to add as vaults.
         name: Optional name for the vault (only used when adding a single path).
-              If None, vaults are auto-named using the llm-vault-N pattern.
+              If None, vaults are auto-named using the vault-N pattern.
 
     Returns:
         Result dict with keys:
@@ -114,17 +114,42 @@ def init_vault(target_dir: str, name: str | None = None) -> dict[str, Any]:
             - names: Dict mapping paths to assigned names
     """
     path = Path(target_dir).resolve()
-    created = False
+    dir_missing = not path.exists()
 
-    if not path.exists():
-        path.mkdir(parents=True, exist_ok=True)
-        (path / "skills").mkdir(exist_ok=True)
-        (path / "agents").mkdir(exist_ok=True)
-        (path / "commands").mkdir(exist_ok=True)
-        created = True
+    if not dir_missing:
+        # Directory exists, just register it
+        result = add_vaults([str(path)], name=name)
+        result["created"] = False
+        result["dir_missing"] = False
+        return result
+
+    # Directory doesn't exist — return signal for CLI to handle prompting
+    result: dict[str, Any] = {
+        "added": [],
+        "skipped": [],
+        "errors": [],
+        "names": {},
+        "created": False,
+        "dir_missing": True,
+        "target_path": str(path),
+    }
+    return result
+
+
+def create_vault_directory(target_dir: str, name: str | None = None) -> dict[str, Any]:
+    """Create the vault directory structure and register it.
+
+    Called after user confirms directory creation (or with --yes).
+    """
+    path = Path(target_dir).resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "skills").mkdir(exist_ok=True)
+    (path / "agents").mkdir(exist_ok=True)
+    (path / "commands").mkdir(exist_ok=True)
 
     result = add_vaults([str(path)], name=name)
-    result["created"] = created
+    result["created"] = True
+    result["dir_missing"] = False
     return result
 
 

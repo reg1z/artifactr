@@ -5,7 +5,7 @@ from unittest import mock
 
 import pytest
 
-from artifactr.catalog import init_vault
+from artifactr.catalog import create_vault_directory, init_vault
 
 
 class TestInitVault:
@@ -14,7 +14,7 @@ class TestInitVault:
     @mock.patch("artifactr.catalog.save_config")
     @mock.patch("artifactr.catalog.load_config")
     def test_creates_new_directory_with_scaffolding(self, mock_load, mock_save, tmp_path):
-        """Verify new directory is created with subdirs."""
+        """Verify new directory signals dir_missing, then create_vault_directory creates it."""
         vault_dir = tmp_path / "new-vault"
 
         mock_load.return_value = {
@@ -25,6 +25,12 @@ class TestInitVault:
         }
 
         result = init_vault(str(vault_dir))
+
+        assert result["dir_missing"] is True
+        assert result["created"] is False
+
+        # Simulate user confirming directory creation
+        result = create_vault_directory(str(vault_dir))
 
         assert result["created"] is True
         assert len(result["added"]) == 1
@@ -51,13 +57,14 @@ class TestInitVault:
         result = init_vault(str(vault_dir))
 
         assert result["created"] is False
+        assert result["dir_missing"] is False
         assert len(result["added"]) == 1
         assert (vault_dir / "README.md").read_text() == "existing content"
 
     @mock.patch("artifactr.catalog.save_config")
     @mock.patch("artifactr.catalog.load_config")
     def test_init_with_name(self, mock_load, mock_save, tmp_path):
-        """Verify vault is registered with explicit name."""
+        """Verify vault is registered with explicit name after directory creation."""
         vault_dir = tmp_path / "named-vault"
 
         mock_load.return_value = {
@@ -68,7 +75,9 @@ class TestInitVault:
         }
 
         result = init_vault(str(vault_dir), name="my-vault")
+        assert result["dir_missing"] is True
 
+        result = create_vault_directory(str(vault_dir), name="my-vault")
         assert result["names"][str(vault_dir.resolve())] == "my-vault"
 
     @mock.patch("artifactr.catalog.save_config")
@@ -85,8 +94,10 @@ class TestInitVault:
         }
 
         result = init_vault(str(vault_dir))
+        assert result["dir_missing"] is True
 
-        assert result["names"][str(vault_dir.resolve())] == "llm-vault-1"
+        result = create_vault_directory(str(vault_dir))
+        assert result["names"][str(vault_dir.resolve())] == "vault-1"
 
     @mock.patch("artifactr.catalog.save_config")
     @mock.patch("artifactr.catalog.load_config")
@@ -97,7 +108,7 @@ class TestInitVault:
 
         mock_load.return_value = {
             "vaults": [str(vault_dir.resolve())],
-            "vault_names": {str(vault_dir.resolve()): "llm-vault-1"},
+            "vault_names": {str(vault_dir.resolve()): "vault-1"},
             "default_vault": str(vault_dir.resolve()),
             "default_tool": "claude-code",
         }
@@ -136,6 +147,40 @@ class TestVaultInitCLIParsing:
         parser = create_parser()
         args = parser.parse_args(["vault", "init", "/path", "--set-default"])
         assert args.set_default is True
+
+    def test_vault_init_with_yes(self):
+        """Verify --yes flag is parsed."""
+        from artifactr.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["vault", "init", "/path", "--yes"])
+        assert args.yes is True
+
+    def test_vault_init_with_y(self):
+        """Verify -y shorthand is parsed."""
+        from artifactr.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["vault", "init", "/path", "-y"])
+        assert args.yes is True
+
+    def test_vault_create_alias(self):
+        """Verify 'create' works as alias for 'init'."""
+        from artifactr.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["vault", "create", "/path/to/vault"])
+        assert args.vault_command == "create"
+        assert args.target_dir == "/path/to/vault"
+
+    def test_vault_cr_alias(self):
+        """Verify 'cr' works as alias for 'init'."""
+        from artifactr.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["vault", "cr", "/path/to/vault"])
+        assert args.vault_command == "cr"
+        assert args.target_dir == "/path/to/vault"
 
 
 if __name__ == "__main__":

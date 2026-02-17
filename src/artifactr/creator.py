@@ -95,8 +95,8 @@ def create_artifact(
 
         # Build frontmatter
         frontmatter = {}
-        # Agents include name in frontmatter; commands do not
-        if artifact_type == "agent":
+        # Agents include name in frontmatter when explicitly provided; commands do not
+        if artifact_type == "agent" and name is not None:
             frontmatter["name"] = name
         if description:
             frontmatter["description"] = description
@@ -231,6 +231,70 @@ def resolve_project_target(
     return {"success": True, "paths": paths, "error": None}
 
 
+def _parse_frontmatter_name(file_path: Path) -> str | None:
+    """Read YAML frontmatter from a file and extract the 'name' field.
+
+    Only reads lines until the closing '---' delimiter.
+    """
+    try:
+        with file_path.open(encoding="utf-8") as f:
+            first_line = f.readline().strip()
+            if first_line != "---":
+                return None
+            for line in f:
+                stripped = line.strip()
+                if stripped == "---":
+                    break
+                if stripped.startswith("name:"):
+                    # Extract value after "name:"
+                    value = stripped[5:].strip()
+                    # Remove surrounding quotes if present
+                    if (value.startswith('"') and value.endswith('"')) or \
+                       (value.startswith("'") and value.endswith("'")):
+                        value = value[1:-1]
+                    return value if value else None
+    except (OSError, UnicodeDecodeError):
+        pass
+    return None
+
+
+def _find_by_frontmatter_name(
+    artifact_type: str,
+    name: str,
+    search_dir: Path,
+) -> Path | None:
+    """Scan artifacts of a type and return the first whose frontmatter 'name' matches.
+
+    Searches in alphabetical filesystem order.
+    """
+    subdir = _TYPE_SUBDIRS.get(artifact_type)
+    if subdir is None:
+        return None
+
+    base = search_dir / subdir
+    if not base.is_dir():
+        return None
+
+    if artifact_type in _DIRECTORY_TYPES:
+        # Skills: scan subdirectories for SKILL.md
+        for item in sorted(base.iterdir()):
+            if item.is_dir():
+                skill_file = item / "SKILL.md"
+                if skill_file.is_file():
+                    fm_name = _parse_frontmatter_name(skill_file)
+                    if fm_name == name:
+                        return skill_file
+    else:
+        # Commands/agents: scan .md files
+        for item in sorted(base.iterdir()):
+            if item.is_file() and item.suffix == ".md":
+                fm_name = _parse_frontmatter_name(item)
+                if fm_name == name:
+                    return item
+
+    return None
+
+
 def resolve_edit_target(
     artifact_type: str,
     artifact_name: str,
@@ -280,6 +344,18 @@ def resolve_edit_target(
             if target.exists():
                 return {"success": True, "path": target, "error": None}
 
+        # Frontmatter fallback for --here mode
+        for tool_name in tools:
+            adapter = get_tool(tool_name)
+            if adapter is None:
+                continue
+            if subdir not in adapter.supported_types:
+                continue
+            dest = adapter.get_destination(subdir, Path.cwd())
+            fm_match = _find_by_frontmatter_name(artifact_type, artifact_name, dest.parent)
+            if fm_match is not None:
+                return {"success": True, "path": fm_match, "error": None}
+
         return {
             "success": False,
             "path": None,
@@ -306,6 +382,10 @@ def resolve_edit_target(
             target = Path(vault_path) / subdir / f"{artifact_name}.md"
 
         if not target.exists():
+            # Frontmatter fallback
+            fm_match = _find_by_frontmatter_name(artifact_type, artifact_name, Path(vault_path))
+            if fm_match is not None:
+                return {"success": True, "path": fm_match, "error": None}
             return {
                 "success": False,
                 "path": None,

@@ -180,6 +180,67 @@ def discover_global_artifacts(tools_filter: list[str] | None = None) -> list[dic
     return artifacts
 
 
+def discover_artifacts_by_structure(target_path: Path, depth: int = 2) -> list[dict]:
+    """Walk directories up to `depth` levels looking for artifact-shaped content.
+
+    Searches for directories named skills/, agents/, commands/ and identifies
+    artifact-shaped content within them.
+
+    Args:
+        target_path: Root directory to scan from.
+        depth: Maximum depth to recurse (0 = target only).
+
+    Returns:
+        List of artifact dicts sorted by type then name.
+    """
+    artifacts = []
+    _artifact_dirs = {"skills", "agents", "commands"}
+
+    def _scan_artifact_dir(base: Path, parent_label: str) -> None:
+        for artifact_type, singular in [("skills", "skill"), ("commands", "command"), ("agents", "agent")]:
+            art_dir = base / artifact_type
+            if not art_dir.is_dir():
+                continue
+            if artifact_type == "skills":
+                for item in art_dir.iterdir():
+                    if item.is_dir() and (item / "SKILL.md").is_file():
+                        artifacts.append({
+                            "name": item.name,
+                            "type": singular,
+                            "type_plural": artifact_type,
+                            "path": item.resolve(),
+                            "tool": "directory",
+                            "config_dir": str(base),
+                        })
+            else:
+                for item in art_dir.iterdir():
+                    if item.is_file() and item.suffix == ".md":
+                        artifacts.append({
+                            "name": item.stem,
+                            "type": singular,
+                            "type_plural": artifact_type,
+                            "path": item.resolve(),
+                            "tool": "directory",
+                            "config_dir": str(base),
+                        })
+
+    def _walk(directory: Path, current_depth: int) -> None:
+        # Check if this directory itself contains artifact dirs
+        _scan_artifact_dir(directory, str(directory))
+        if current_depth >= depth:
+            return
+        try:
+            for child in sorted(directory.iterdir()):
+                if child.is_dir() and child.name not in _artifact_dirs:
+                    _walk(child, current_depth + 1)
+        except PermissionError:
+            pass
+
+    _walk(target_path, 0)
+    artifacts.sort(key=lambda a: (a["type"], a["name"]))
+    return artifacts
+
+
 def extract_description(artifact: dict) -> str:
     """Extract the description from an artifact's frontmatter.
 

@@ -14,7 +14,7 @@ class TestAutoNaming:
     @mock.patch("artifactr.catalog.save_config")
     @mock.patch("artifactr.catalog.load_config")
     def test_first_vault_auto_named(self, mock_load, mock_save, tmp_path):
-        """Verify first auto-named vault gets llm-vault-1."""
+        """Verify first auto-named vault gets vault-1."""
         vault_dir = tmp_path / "vault1"
         vault_dir.mkdir()
 
@@ -28,25 +28,25 @@ class TestAutoNaming:
         result = add_vaults([str(vault_dir)])
 
         assert len(result["added"]) == 1
-        assert result["names"][str(vault_dir.resolve())] == "llm-vault-1"
+        assert result["names"][str(vault_dir.resolve())] == "vault-1"
 
     @mock.patch("artifactr.catalog.save_config")
     @mock.patch("artifactr.catalog.load_config")
     def test_incrementing_counter(self, mock_load, mock_save, tmp_path):
-        """Verify counter increments past existing llm-vault-N names."""
+        """Verify counter increments past existing vault-N names."""
         vault_dir = tmp_path / "vault2"
         vault_dir.mkdir()
 
         mock_load.return_value = {
             "vaults": ["/existing"],
-            "vault_names": {"/existing": "llm-vault-3"},
+            "vault_names": {"/existing": "vault-3"},
             "default_vault": "/existing",
             "default_tool": "claude-code",
         }
 
         result = add_vaults([str(vault_dir)])
 
-        assert result["names"][str(vault_dir.resolve())] == "llm-vault-4"
+        assert result["names"][str(vault_dir.resolve())] == "vault-4"
 
     @mock.patch("artifactr.catalog.save_config")
     @mock.patch("artifactr.catalog.load_config")
@@ -68,8 +68,8 @@ class TestAutoNaming:
 
         assert len(result["added"]) == 2
         names = list(result["names"].values())
-        assert names[0] == "llm-vault-1"
-        assert names[1] == "llm-vault-2"
+        assert names[0] == "vault-1"
+        assert names[1] == "vault-2"
 
     @mock.patch("artifactr.catalog.save_config")
     @mock.patch("artifactr.catalog.load_config")

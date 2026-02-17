@@ -367,11 +367,9 @@ def import_artifacts(
     # Resolve target path
     target_path = Path(target).resolve()
 
-    # Validate target is a git repository
+    # Validate target exists
     if not target_path.exists():
         errors.append(f"Error: Target path does not exist: {target}")
-    elif not is_git_repo(target_path):
-        errors.append("Error: Target is not a git repository!")
 
     # Resolve vault path
     if vault is None:
@@ -510,12 +508,13 @@ def import_artifacts(
                 tool_name, imported_artifact_names,
             )
 
-    # Add imported paths and .art-cache to .git/info/exclude
-    if no_exclude:
-        add_to_git_exclude(target_path, [".art-cache"])
-    else:
-        exclude_patterns.append(".art-cache")
-        add_to_git_exclude(target_path, exclude_patterns)
+    # Add imported paths and .art-cache to .git/info/exclude (only for git repos)
+    if is_git_repo(target_path):
+        if no_exclude:
+            add_to_git_exclude(target_path, [".art-cache"])
+        else:
+            exclude_patterns.append(".art-cache")
+            add_to_git_exclude(target_path, exclude_patterns)
 
     return {
         "success": True,
