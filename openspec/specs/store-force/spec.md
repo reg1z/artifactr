@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Global store source
 The `store` command MUST accept `--global`/`-g` to store artifacts from global tool configuration directories into a vault.
@@ -33,3 +33,20 @@ The `store` command MUST accept `--tools` to filter which tools' artifacts are s
 #### Scenario: Tool alias resolution
 - **WHEN** `art store --global --tools claude` is run
 - **THEN** `claude` MUST be resolved to `claude-code` before filtering
+
+### Requirement: Graceful skip for symlinked artifacts in store
+`art store` MUST detect when a source artifact is a symlink pointing to the target vault and skip it gracefully.
+
+#### Scenario: Source is symlink to target vault
+- **WHEN** `art store` encounters a source artifact that is a symlink
+- **AND** the symlink resolves to a path within the target vault
+- **THEN** the artifact MUST be skipped with a message: "Skipping '<name>': already linked to this vault"
+
+#### Scenario: Source is symlink to different vault
+- **WHEN** `art store` encounters a source artifact that is a symlink
+- **AND** the symlink resolves to a path outside the target vault
+- **THEN** the artifact MUST be stored normally (content copied through the symlink)
+
+#### Scenario: Source is not a symlink
+- **WHEN** `art store` encounters a source artifact that is a regular file or directory
+- **THEN** the existing store behavior MUST be unchanged

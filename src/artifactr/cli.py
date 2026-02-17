@@ -185,8 +185,8 @@ def create_parser() -> argparse.ArgumentParser:
             "Namespaces:\n"
             "  vault    (v)    Manage vaults (add, init, rm, name, select, ls)\n"
             "  tool     (t)    Manage tools (select, ls, add, rm, info)\n"
-            "  project  (p)    Project-side artifact operations (import, rm, wipe, ls)\n"
-            "  config   (c)    Tool-specific global configs & artifactr settings (import, rm, wipe, ls, edit)\n"
+            "  project  (p)    Project-side artifact operations (import, rm, wipe, ls, link, unlink)\n"
+            "  config   (c)    Tool-specific global configs & artifactr settings (import, rm, wipe, ls, link, unlink, edit)\n"
             "\n"
             "Discovery:\n"
             "  spelunk  (sp)   Discover artifacts in a directory, vault, or global config\n"
@@ -444,6 +444,46 @@ def create_parser() -> argparse.ArgumentParser:
     )
     add_type_filter_args(proj_list)
 
+    # proj link
+    proj_link = proj_subparsers.add_parser(
+        "link", aliases=["ln"], help="Link imported artifacts to vault sources (symlink)"
+    )
+    proj_link.add_argument("names", nargs="*", help="Artifact names or glob patterns")
+    proj_link.add_argument(
+        "-a", "--all", action="store_true", dest="link_all",
+        help="Link all imported artifacts",
+    )
+    proj_link.add_argument(
+        "-f", "--force", action="store_true",
+        help="Auto-backup and link without prompting on diff",
+    )
+    proj_link.add_argument(
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Scope to vault(s) — comma-separated or repeatable (default: default vault)",
+    )
+    proj_link.add_argument(
+        "--target", default=None, help="Project path (default: cwd)",
+    )
+    add_type_filter_args(proj_link, allow_names=False)
+
+    # proj unlink
+    proj_unlink = proj_subparsers.add_parser(
+        "unlink", aliases=["uln"], help="Unlink artifacts (replace symlinks with copies)"
+    )
+    proj_unlink.add_argument("names", nargs="*", help="Artifact names or glob patterns")
+    proj_unlink.add_argument(
+        "-a", "--all", action="store_true", dest="unlink_all",
+        help="Unlink all imported artifacts",
+    )
+    proj_unlink.add_argument(
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Scope to vault(s) — comma-separated or repeatable (default: default vault)",
+    )
+    proj_unlink.add_argument(
+        "--target", default=None, help="Project path (default: cwd)",
+    )
+    add_type_filter_args(proj_unlink, allow_names=False)
+
     # config namespace (art config / art conf)
     config_parser = subparsers.add_parser(
         "config", aliases=["conf", "c"],
@@ -510,6 +550,40 @@ def create_parser() -> argparse.ArgumentParser:
         "--tools", help="Comma-separated tool filter",
     )
     add_type_filter_args(conf_list)
+
+    # conf link
+    conf_link = conf_subparsers.add_parser(
+        "link", aliases=["ln"], help="Link globally imported artifacts to vault sources (symlink)"
+    )
+    conf_link.add_argument("names", nargs="*", help="Artifact names or glob patterns")
+    conf_link.add_argument(
+        "-a", "--all", action="store_true", dest="link_all",
+        help="Link all globally imported artifacts",
+    )
+    conf_link.add_argument(
+        "-f", "--force", action="store_true",
+        help="Auto-backup and link without prompting on diff",
+    )
+    conf_link.add_argument(
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Scope to vault(s) — comma-separated or repeatable (default: default vault)",
+    )
+    add_type_filter_args(conf_link, allow_names=False)
+
+    # conf unlink
+    conf_unlink = conf_subparsers.add_parser(
+        "unlink", aliases=["uln"], help="Unlink globally imported artifacts (replace symlinks with copies)"
+    )
+    conf_unlink.add_argument("names", nargs="*", help="Artifact names or glob patterns")
+    conf_unlink.add_argument(
+        "-a", "--all", action="store_true", dest="unlink_all",
+        help="Unlink all globally imported artifacts",
+    )
+    conf_unlink.add_argument(
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Scope to vault(s) — comma-separated or repeatable (default: default vault)",
+    )
+    add_type_filter_args(conf_unlink, allow_names=False)
 
     # conf edit
     conf_subparsers.add_parser("edit", aliases=["ed"], help="Open artifactr's global YAML config in editor")
@@ -1219,6 +1293,185 @@ def handle_conf_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_vault_scope(args: argparse.Namespace) -> list[str]:
+    """Resolve vault labels to scope link/unlink operations to.
+
+    If --vault/-V is provided, uses those vaults (supports comma-separated and repeatable).
+    Otherwise, falls back to the default vault label.
+
+    Returns:
+        List of vault labels (names or directory basenames) to scope to.
+    """
+    raw_vaults = getattr(args, "vaults", None)
+    if raw_vaults:
+        # Flatten comma-separated values from repeatable --vault flags
+        labels = []
+        for v in raw_vaults:
+            for part in v.split(","):
+                part = part.strip()
+                if part:
+                    # Resolve name-or-path to the vault label used in cache
+                    resolved_path = get_vault_by_name_or_path(part)
+                    if resolved_path:
+                        # Look up the display name for this vault
+                        info = list_vaults()
+                        vault_name = info["vault_names"].get(resolved_path)
+                        labels.append(vault_name if vault_name else Path(resolved_path).name)
+                    else:
+                        # Use as-is (might be a label already)
+                        labels.append(part)
+        return labels
+
+    # Default: use the default vault
+    default_vault = get_default_vault()
+    if default_vault:
+        info = list_vaults()
+        vault_name = info["vault_names"].get(default_vault)
+        return [vault_name if vault_name else Path(default_vault).name]
+
+    return []
+
+
+def handle_proj_link(args: argparse.Namespace) -> int:
+    """Handle the proj link command."""
+    from .importer import link_artifacts
+
+    target_path = Path(args.target).resolve() if getattr(args, "target", None) else Path.cwd().resolve()
+    names = args.names if args.names else []
+    all_flag = getattr(args, "link_all", False)
+    force = getattr(args, "force", False)
+    type_filters = resolve_type_filters(args)
+
+    vault_labels = _resolve_vault_scope(args)
+    if not vault_labels:
+        print("Error: No default vault set. Use --vault/-V to specify a vault.", file=sys.stderr)
+        return 1
+
+    if not names and not all_flag:
+        print("Error: Specify artifact names or use --all/-a to link all artifacts.", file=sys.stderr)
+        return 1
+
+    result = link_artifacts(target_path, names, all_flag, force, vault_labels, type_filters)
+
+    for error in result["errors"]:
+        print(f"Error: {error}", file=sys.stderr)
+
+    summary_parts = []
+    if result["linked"]:
+        summary_parts.append(f"{result['linked']} linked")
+    if result["skipped"]:
+        summary_parts.append(f"{result['skipped']} skipped")
+    if result["backed_up"]:
+        summary_parts.append(f"{result['backed_up']} backed up")
+    if summary_parts:
+        print(f"\n{', '.join(summary_parts)}.")
+
+    return 1 if result["errors"] and not result["linked"] else 0
+
+
+def handle_proj_unlink(args: argparse.Namespace) -> int:
+    """Handle the proj unlink command."""
+    from .importer import unlink_artifacts
+
+    target_path = Path(args.target).resolve() if getattr(args, "target", None) else Path.cwd().resolve()
+    names = args.names if args.names else []
+    all_flag = getattr(args, "unlink_all", False)
+    type_filters = resolve_type_filters(args)
+
+    vault_labels = _resolve_vault_scope(args)
+    if not vault_labels:
+        print("Error: No default vault set. Use --vault/-V to specify a vault.", file=sys.stderr)
+        return 1
+
+    if not names and not all_flag:
+        print("Error: Specify artifact names or use --all/-a to unlink all artifacts.", file=sys.stderr)
+        return 1
+
+    result = unlink_artifacts(target_path, names, all_flag, vault_labels, type_filters)
+
+    for error in result["errors"]:
+        print(f"Error: {error}", file=sys.stderr)
+
+    summary_parts = []
+    if result["unlinked"]:
+        summary_parts.append(f"{result['unlinked']} unlinked")
+    if result["skipped"]:
+        summary_parts.append(f"{result['skipped']} skipped")
+    if summary_parts:
+        print(f"\n{', '.join(summary_parts)}.")
+
+    return 1 if result["errors"] and not result["unlinked"] else 0
+
+
+def handle_conf_link(args: argparse.Namespace) -> int:
+    """Handle the conf link command."""
+    from .importer import link_artifacts_global
+
+    names = args.names if args.names else []
+    all_flag = getattr(args, "link_all", False)
+    force = getattr(args, "force", False)
+    type_filters = resolve_type_filters(args)
+
+    vault_labels = _resolve_vault_scope(args)
+    if not vault_labels:
+        print("Error: No default vault set. Use --vault/-V to specify a vault.", file=sys.stderr)
+        return 1
+
+    if not names and not all_flag:
+        print("Error: Specify artifact names or use --all/-a to link all artifacts.", file=sys.stderr)
+        return 1
+
+    result = link_artifacts_global(names, all_flag, force, vault_labels, type_filters)
+
+    for error in result["errors"]:
+        print(f"Error: {error}", file=sys.stderr)
+
+    summary_parts = []
+    if result["linked"]:
+        summary_parts.append(f"{result['linked']} linked")
+    if result["skipped"]:
+        summary_parts.append(f"{result['skipped']} skipped")
+    if result["backed_up"]:
+        summary_parts.append(f"{result['backed_up']} backed up")
+    if summary_parts:
+        print(f"\n{', '.join(summary_parts)}.")
+
+    return 1 if result["errors"] and not result["linked"] else 0
+
+
+def handle_conf_unlink(args: argparse.Namespace) -> int:
+    """Handle the conf unlink command."""
+    from .importer import unlink_artifacts_global
+
+    names = args.names if args.names else []
+    all_flag = getattr(args, "unlink_all", False)
+    type_filters = resolve_type_filters(args)
+
+    vault_labels = _resolve_vault_scope(args)
+    if not vault_labels:
+        print("Error: No default vault set. Use --vault/-V to specify a vault.", file=sys.stderr)
+        return 1
+
+    if not names and not all_flag:
+        print("Error: Specify artifact names or use --all/-a to unlink all artifacts.", file=sys.stderr)
+        return 1
+
+    result = unlink_artifacts_global(names, all_flag, vault_labels, type_filters)
+
+    for error in result["errors"]:
+        print(f"Error: {error}", file=sys.stderr)
+
+    summary_parts = []
+    if result["unlinked"]:
+        summary_parts.append(f"{result['unlinked']} unlinked")
+    if result["skipped"]:
+        summary_parts.append(f"{result['skipped']} skipped")
+    if summary_parts:
+        print(f"\n{', '.join(summary_parts)}.")
+
+    return 1 if result["errors"] and not result["unlinked"] else 0
+
+
 def _apply_type_filters(artifacts: list[dict], type_filters: dict[str, Any]) -> list[dict]:
     """Filter a list of artifacts based on type filters."""
     result = []
@@ -1252,11 +1505,29 @@ def _load_cache_entries(target: Path) -> list[dict]:
     vault_tools_dict, _ = load_active_vault_tools()
     tool_config_dirs = get_tool_config_dirs(global_tools=global_tools, vault_tools=vault_tools_dict)
 
+    current_section = "imported"  # Default for legacy files
+
     for line in content.splitlines():
         line = line.strip()
         if not line:
             continue
-        parts = line.split(".")
+
+        # Handle section headers
+        if line == "[vault_paths]":
+            current_section = "vault_paths"
+            continue
+        if line == "[imported]":
+            current_section = "imported"
+            continue
+        if current_section == "vault_paths":
+            continue
+
+        # Strip :suffix if present
+        entry = line
+        if ":" in entry:
+            entry = entry.rsplit(":", 1)[0]
+
+        parts = entry.split(".")
         if len(parts) < 3:
             continue
         vault_name = parts[0]
@@ -1296,11 +1567,29 @@ def _load_global_cache_entries() -> list[dict]:
     vault_tools_dict, _ = load_active_vault_tools()
     tool_global_dirs = get_tool_global_dirs(global_tools=global_tools, vault_tools=vault_tools_dict)
 
+    current_section = "imported"  # Default for legacy files
+
     for line in content.splitlines():
         line = line.strip()
         if not line:
             continue
-        parts = line.split(".")
+
+        # Handle section headers
+        if line == "[vault_paths]":
+            current_section = "vault_paths"
+            continue
+        if line == "[imported]":
+            current_section = "imported"
+            continue
+        if current_section == "vault_paths":
+            continue
+
+        # Strip :suffix if present
+        entry = line
+        if ":" in entry:
+            entry = entry.rsplit(":", 1)[0]
+
+        parts = entry.split(".")
         if len(parts) < 3:
             continue
         vault_name = parts[0]
@@ -2488,8 +2777,20 @@ def handle_store(args: argparse.Namespace) -> int:
     stored_count = 0
     for idx in indices:
         art = artifacts[idx]
-        dest = vault_path / art["type_plural"] / (art["path"].name if art["type"] == "skill" else art["path"].name)
-        result = copy_with_prompt(art["path"], dest, force=force)
+        source_path = art["path"]
+        dest = vault_path / art["type_plural"] / (source_path.name if art["type"] == "skill" else source_path.name)
+
+        # Skip if source is a symlink pointing to the target vault
+        if source_path.is_symlink():
+            try:
+                resolved = source_path.resolve()
+                if str(resolved).startswith(str(vault_path.resolve())):
+                    print(f"Skipping '{art['name']}': already linked to this vault")
+                    continue
+            except OSError:
+                pass
+
+        result = copy_with_prompt(source_path, dest, force=force)
         if result["copied"] > 0:
             print(f"Stored: {art['name']} ({art['type']}) -> {dest}")
             stored_count += 1
@@ -2652,6 +2953,10 @@ def _main() -> int:
             return handle_proj_wipe(args)
         if proj_cmd in ("ls", "list"):
             return handle_proj_list(args)
+        if proj_cmd in ("link", "ln"):
+            return handle_proj_link(args)
+        if proj_cmd in ("unlink", "uln"):
+            return handle_proj_unlink(args)
 
     if args.command in ("config", "conf", "c"):
         conf_cmd = getattr(args, "conf_command", None)
@@ -2668,6 +2973,10 @@ def _main() -> int:
             return handle_conf_list(args)
         if conf_cmd in ("edit", "ed"):
             return handle_config_edit(args)
+        if conf_cmd in ("link", "ln"):
+            return handle_conf_link(args)
+        if conf_cmd in ("unlink", "uln"):
+            return handle_conf_unlink(args)
 
     if args.command in ("vault", "v"):
         if args.vault_command is None:

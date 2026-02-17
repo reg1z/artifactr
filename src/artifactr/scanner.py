@@ -296,7 +296,9 @@ def load_import_cache(target: Path) -> dict[str, list[str]]:
     """Load the import cache from a target directory.
 
     Reads .art-cache/imported and returns a mapping of artifact names
-    to lists of vault names they were imported from.
+    to lists of vault names they were imported from. Supports both
+    legacy format (no headers, no suffixes) and v2 format (with
+    [vault_paths]/[imported] sections and :linked/:copied/:win_hardlinked suffixes).
 
     Args:
         target: Path to the target directory.
@@ -315,12 +317,31 @@ def load_import_cache(target: Path) -> dict[str, list[str]]:
     except OSError:
         return {}
 
+    current_section = "imported"  # Default for legacy files
+
     for line in content.splitlines():
         line = line.strip()
         if not line:
             continue
 
-        parts = line.split(".")
+        # Handle section headers
+        if line == "[vault_paths]":
+            current_section = "vault_paths"
+            continue
+        if line == "[imported]":
+            current_section = "imported"
+            continue
+
+        # Skip vault_paths entries
+        if current_section == "vault_paths":
+            continue
+
+        # Strip :suffix if present
+        entry = line
+        if ":" in entry:
+            entry = entry.rsplit(":", 1)[0]
+
+        parts = entry.split(".")
         if len(parts) < 3:
             continue
 
