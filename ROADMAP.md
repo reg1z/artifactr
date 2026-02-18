@@ -1,63 +1,65 @@
-## Coding Agent Tool Support
-- [x] claude-code
-- [x] opencode
-- [x] Codex (built-in, skills only)
+# Tool Support
+- [x] Built-ins for popular tools
+  - [x] claude-code
+  - [x] opencode
+  - [x] Codex (skills only)
 - [x] Custom tool support via `art tool add` (Cursor, Gemini CLI, Amp, Goose, etc.)
 - [x] Per-artifact-type path configuration (partial artifact support)
 - [x] Three-tier tool resolution: built-in < global config < vault config
 - [x] `vault.yaml` for portable vault metadata and vault-scoped tool definitions
 
+# Vault Management
+
 ## User-friendliness
 - [x] Add the option for a user to disable artifact(s) from being added to `.git/info/exclude` (`--no-exclude` on `proj import`).
+- [x] When adding a new vault, if a vault already exists with the same name, have the program prompt the user for a different name.
 
-New commands
-- [ ] New command: Generate an example vault
-  - Generates an example vault with some different types of artifacts.
-- [x] New command: For editing a target repo's artifacts. Delete/wipe/etc. (`proj rm`, `proj wipe`, `conf rm`, `conf wipe`).
+## Catalog Management
+- [ ] Catalog Management
+  - [ ] Support for exporting any number of vaults to a directory (as a folder/zip archive/etc)
+  - [ ] Import an entire **catalog** (of potentially many vaults) with 1 command
 
-## Feature Update: Adding Vaults
-- [ ] New Command: 
-  - Adds an entire vault catalog in one command.
-  - The default names of vaults should just be the same as their directory name.
-  - When adding a new vault, if a vault already exists with the same name, have the program prompt the user for a different name.
-  - Has a `--set-default` flag that sets the initialized vault as the new default
-- [ ] `art vault init <vault_name> <target_dir>` Initialize an entirely new vault in a target directory. Requires providing a name for the vault.
-  - If a user has no default vault configured, the program will notify users to either use `art vault add` to add a vault into the tool's configuration or to use `art vault init` to initialize a new vault.
-  - Has a `--set-default` flag that sets the initialized vault as the new default
+## Vault-Tool Pairs
+- [ ] Vault-Tool pairs.
+  - Ability to explicitly "pair" a vault with an intended agentic tool.
+  - Defined in `vault.yaml` with any applicable custom tool definitions.
+- Key Questions
+  - Would this pairing override the selected default tool when using a certain vault?
+    - Potentially, this setting could override any default tool during multi-vault operations, unless a specific tool is defined with `--tools`
 
+# Artifact Management
+Not all agentic tools support the same artifact types
 
-## Feature Addition: Artifact Creation
-NOTE: Not all coding agents support the same artifact types. It just so happens that claude-code and opencode support similar structures.
+CRUD Support for:
+- [x] Skills
+- [x] Commands
+- [x] Agents
+- [ ] Custom Artifact Types
 
-- [x] New command: `art create <artifact-type>`
-  - [ ] TUI-based artifact creation
-    - uses the textual library for the interface https://textual.textualize.io/
-  - Support for
-    - Initially we only want to support skills.
-    - [x] Skills
-    - [ ] Commands
-    - [ ] Agents
-
-### Artifact Creation: Skills
-Documentation referencing tool-specific yaml frontmatter has been included in the repo's references.
-- Input fields for yaml frontmatter
-  - name (required)
-  - description (required)
-  - the user can add any arbitrary number of other frontmatter fields they wish. Suggestions exist for frontmatter to use based on the tool they have selected. These suggestions provide tooltips with some small info on the suggested frontmatter field, the tool it's supported in and what it's used for. The reason being that claude-code/opencode/other coding agents automatically detect different fields from one another.
-- Input field for the actual skill content.
-
-## Feature Addition: Artifact Editing
-- [x] New command: `art edit <artifact-type> <artifact-name>`
-  - Opens the specific artifact's main `<ARTIFACT>.md` (e.g. SKILL.md) in your terminal's/shell's default text editor (nano/vim/nvim, whatever the env var is configured as)
-
-## Feature Addition: Marketplace Integration
-- [ ] Add a way to parse plugin / skill marketplaces for artifacts.
-  - e.g. in the case of claude marketplaces (https://code.claude.com/docs/en/plugin-marketplaces), it would use `marketplace.json` to find targets.
-- [ ] User can define their own personal list of marketplace URLs
+## Artifact Creation
+- [x] `art create <artifact-type>` command
 
 
-## Feature Addition: Custom Artifact types
-- [ ] Add a way to add support for custom artifact types.
+## Artifact Editing
+- [x] `art edit <artifact-type> <artifact-name>`
+  - Opens the specific artifact's main `<ARTIFACT>.md` (e.g. SKILL.md) in your terminal/shell default text editor (nano/vim/nvim, whatever the env var is configured as)
+
+## Custom Artifact types
+- [ ] Ability to configure custom artifact types.
  - [ ] Can be defined globally (`~/.config/artifactr/`) or vault-scoped (`vault.yaml`).
-- Questions:
-  - Should these be tied to individual tools? The addition of additional artifact types might bloat the output of `art tool list`.
+- Key Questions
+  - Should these be tied to individual tools?
+    - The addition of additional artifact types might bloat the columnar output of `art tool list`.
+
+## User-defined Artifact "Marketplaces" Integration
+- [ ] A way to parse plugin / skill marketplace structures for artifacts.
+  - e.g. claude marketplace format (https://code.claude.com/docs/en/plugin-marketplaces).
+- Key Questions
+  - Should ANY network connectivity be added to the tool at all?
+  - Should a user be able define their own personal list of marketplace URLs to facilitate browsing?
+  - Package manager format for artifact management?
+
+
+
+# TUI
+- [ ] Eventual TUI frontend. Likely implemented with textual (if at all).
