@@ -19,6 +19,48 @@ Vaults are where you store *artifacts*. "Artifact" is a shorter way of saying "a
 
 ![demo1](https://raw.githubusercontent.com/reg1z/media-assets/refs/heads/main/artifactr/demo1.gif)
 
+---
+## Table of Contents
+<details>
+<summary><strong>TOC</strong></summary>
+
+- [Why?](#why-)
+- [Installation](#installation)
+- [Quickstart](#quickstart)
+- [The Essentials](#the-essentials)
+  - [Creating a New Vault](#creating-a-new-vault)
+  - [Adding an Existing Vault](#adding-an-existing-vault)
+  - [Select Your Preferences](#select-your-preferences)
+  - [Spelunk For and Store Artifacts](#spelunk-for-and-store-artifacts)
+  - [Removing Artifacts](#removing-artifacts)
+  - [Importing Artifacts](#importing-artifacts)
+  - [Syncing Artifacts Automatically](#syncing-artifacts-automatically)
+  - [Editing Artifacts - art edit](#editing-artifacts---art-edit)
+  - [Creating Artifacts - art create](#creating-artifacts---art-create)
+  - [Managing Tools](#managing-tools)
+- [Extended Usage](#extended-usage)
+  - [Managing Vaults](#managing-vaults)
+  - [Managing Tools](#managing-tools-1)
+  - [Listing Vault Contents](#listing-vault-contents)
+  - [Removing Vault Artifacts](#removing-vault-artifacts)
+  - [Importing Artifacts (Project)](#importing-artifacts-project)
+  - [Managing Project Artifacts](#managing-project-artifacts)
+  - [Importing Artifacts (Global Config)](#importing-artifacts-global-config)
+  - [Managing Global Config Artifacts](#managing-global-config-artifacts)
+  - [Linking & Unlinking Artifacts](#linking--unlinking-artifacts)
+  - [Import with Linking](#import-with-linking)
+  - [Multi-Vault -V Flag](#multi-vault--v-flag)
+  - [Tool Discovery with --all](#tool-discovery-with---all)
+  - [Link State Display](#link-state-display)
+  - [Creating Artifacts](#creating-artifacts)
+  - [Editing Artifacts](#editing-artifacts)
+  - [Discovering Artifacts](#discovering-artifacts)
+  - [Storing Artifacts](#storing-artifacts)
+- [Vault Structure](#vault-structure)
+
+</details>
+
+---
 ## Installation
 Requires Python 3.10+
 
