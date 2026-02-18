@@ -12,14 +12,17 @@ Stuff under "Planned" will definitely be shipped.
 ### Full-fledged Skill Editing/Creation
 - Ability to CRUD all files/folders within a skill.
 
+### Navigation
+- Ability to `cd` into a target vault/artifact (likely skill) directory without the full filepath
+
 ### Catalog Management
 > *"**Catalog**" is the standard term referring to an entire collection of vaults.*
 
 - Support for exporting any number of vaults to a directory (as a folder/zip archive/etc)
 - Import an entire **catalog** (of potentially many many vaults) with 1 command
 
-### `spelunk` update
-- Output should list the specific location (project/directory) artifacts are found at
+### `spelunk` minor updates
+- Output should list the specific location (project/directory) artifacts are found
 
 
 ---
@@ -42,8 +45,6 @@ Stuff under "Planned" will definitely be shipped.
 	- Would this pairing override the selected default tool when using a certain vault?
 	    - Potentially, this setting would override any default tool during multi-vault operations, unless a specific tool is defined with `--tools`
 
-### Navigation
-- Ability to `cd` into a target vault/artifact (likely skill) directory without the full filepath
 
 ### Other Potential Built-in Artifact Types
 - Scripts
