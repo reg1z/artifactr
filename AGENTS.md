@@ -101,6 +101,7 @@ Supports both legacy (no headers) and v2 format via `_parse_cache_file()`.
 - **Windows symlink fallback**: `create_link()` falls back to hard links when symlinks fail (requires both files on same volume)
 - **Frontmatter search**: Edit-by-name falls back to scanning `.md` files for `name:` YAML frontmatter if direct path lookup fails
 - **Spec-driven dev**: Features are developed against specs in `openspec/changes/`. openspec tools are used in this repo.
+- When updating README.md, edit only lines under the "Extended Usage" heading. No content above it should be touched.
 
 ## Help Text Format
 
