@@ -18,6 +18,9 @@ Stuff under "Planned" will definitely be shipped.
 - Support for exporting any number of vaults to a directory (as a folder/zip archive/etc)
 - Import an entire **catalog** (of potentially many many vaults) with 1 command
 
+### `spelunk` update
+- Output should list the specific location (project/directory) artifacts are found at
+
 
 ---
 
@@ -33,9 +36,28 @@ Stuff under "Planned" will definitely be shipped.
 ### Vault → Tool Pairing
 - Ability to explicitly "pair" a vault with an intended agentic tool.
 - Defined in `vault.yaml` with any applicable custom tool definitions.
+- Would communicate the intention of a vault.
+- Would pair well with vault-specific tool definitions.
 - Key Questions
 	- Would this pairing override the selected default tool when using a certain vault?
 	    - Potentially, this setting would override any default tool during multi-vault operations, unless a specific tool is defined with `--tools`
+
+### Navigation
+- Ability to `cd` into a target vault/artifact (likely skill) directory without the full filepath
+
+### Other Potential Built-in Artifact Types
+- Scripts
+  - Would these be import-able into skills?
+- Hooks (event handlers)
+- AGENTS.md
+  - This doesn't seem terribly useful, as AGENTS.md is usually project-specific.
+  - Is Vault -> Project pairing a good idea?
+
+### Backups
+- Backups for:
+  - Vault Catalog
+  - Program configuration
+
 
 ### Custom Artifact Types
 Not all agentic tools support the same artifact types. And there are frequently new formats and standards popping up.
@@ -48,9 +70,23 @@ Not all agentic tools support the same artifact types. And there are frequently 
 	- The addition of more artifact types might bloat the columnar output of `art tool list`.
 
 
+### Recursive AGENTS.md linking
+- Automate symbolic linking of AGENTS.md throughout an entire project for coding agent tools that do not support it.
+- Running this command would recurse through folders in a project, detecting any AGENTS.md that it finds, creating a symlink with a user-provided filename.
+  - ❓Does this risk the possibility that an agent will read the same content twice? That would double up on context for a single file. Maybe it should just be an empty file that says "Follow AGENTS.md at this same folder level."
+
+
 ---
 
 ## Someday Perhaps
+
+### `spelunk` expanded enumeration
+- Add more sophisticated enumeration of artifacts. Detect all sorts of files associated with LLM dev-tool usage
+  - AGENTS.md, certain json files, ..., etc.
+- Ability to `spelunk` remote repositories?
+  - Goes against design philosophy
+
+### Artifact Security Scanning
 
 ### Marketplace /  Plugin Parsing
 - A way to parse plugin / skill marketplace structures for artifacts
@@ -73,3 +109,5 @@ Not all agentic tools support the same artifact types. And there are frequently 
 - Could facilitate rolling back / testing particular versions of artifacts
 - Key Questions
   - Would this be useful at all when most ppl would probably just use a git repo anyway?
+
+### Converting an artifact between types
