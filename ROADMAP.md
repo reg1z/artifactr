@@ -1,65 +1,75 @@
-# Tool Support
-- [x] Built-ins for popular tools
-  - [x] claude-code
-  - [x] opencode
-  - [x] Codex (skills only)
-- [x] Custom tool support via `art tool add` (Cursor, Gemini CLI, Amp, Goose, etc.)
-- [x] Per-artifact-type path configuration (partial artifact support)
-- [x] Three-tier tool resolution: built-in < global config < vault config
-- [x] `vault.yaml` for portable vault metadata and vault-scoped tool definitions
+# ROADMAP.md
+Keeping track of potential features.
 
-# Vault Management
+Stuff under "Planned" will definitely be shipped.
 
-## User-friendliness
-- [x] Add the option for a user to disable artifact(s) from being added to `.git/info/exclude` (`--no-exclude` on `proj import`).
-- [x] When adding a new vault, if a vault already exists with the same name, have the program prompt the user for a different name.
+## Planned
 
-## Catalog Management
-- [ ] Catalog Management
-  - [ ] Support for exporting any number of vaults to a directory (as a folder/zip archive/etc)
-  - [ ] Import an entire **catalog** (of potentially many vaults) with 1 command
+### Misc. Vault Operations
+- Copying artifacts from one vault to another
+- Duplicating (making a copy of) a vault
 
-## Vault-Tool Pairs
-- [ ] Vault-Tool pairs.
-  - Ability to explicitly "pair" a vault with an intended agentic tool.
-  - Defined in `vault.yaml` with any applicable custom tool definitions.
+### Full-fledged Skill Editing/Creation
+- Ability to CRUD all files/folders within a skill.
+
+### Catalog Management
+> *"**Catalog**" is the standard term referring to an entire collection of vaults.*
+
+- Support for exporting any number of vaults to a directory (as a folder/zip archive/etc)
+- Import an entire **catalog** (of potentially many many vaults) with 1 command
+
+
+---
+
+## Exploring
+
+### Exporting Artifacts
+- Easily export artifacts (most likely to be skills) as a zip archive.
+  - Singular or sets of artifacts
 - Key Questions
-  - Would this pairing override the selected default tool when using a certain vault?
-    - Potentially, this setting could override any default tool during multi-vault operations, unless a specific tool is defined with `--tools`
-
-# Artifact Management
-Not all agentic tools support the same artifact types
-
-CRUD Support for:
-- [x] Skills
-- [x] Commands
-- [x] Agents
-- [ ] Custom Artifact Types
-
-## Artifact Creation
-- [x] `art create <artifact-type>` command
+  - What archive format & folder structure do common tools accept as importable? What artifact types do they support?
 
 
-## Artifact Editing
-- [x] `art edit <artifact-type> <artifact-name>`
-  - Opens the specific artifact's main `<ARTIFACT>.md` (e.g. SKILL.md) in your terminal/shell default text editor (nano/vim/nvim, whatever the env var is configured as)
-
-## Custom Artifact types
-- [ ] Ability to configure custom artifact types.
- - [ ] Can be defined globally (`~/.config/artifactr/`) or vault-scoped (`vault.yaml`).
+### Vault → Tool Pairing
+- Ability to explicitly "pair" a vault with an intended agentic tool.
+- Defined in `vault.yaml` with any applicable custom tool definitions.
 - Key Questions
-  - Should these be tied to individual tools?
-    - The addition of additional artifact types might bloat the columnar output of `art tool list`.
+	- Would this pairing override the selected default tool when using a certain vault?
+	    - Potentially, this setting would override any default tool during multi-vault operations, unless a specific tool is defined with `--tools`
 
-## User-defined Artifact "Marketplaces" Integration
-- [ ] A way to parse plugin / skill marketplace structures for artifacts.
-  - e.g. claude marketplace format (https://code.claude.com/docs/en/plugin-marketplaces).
+### Custom Artifact Types
+Not all agentic tools support the same artifact types. And there are frequently new formats and standards popping up.
+
+- Ability to configure custom artifact types.
 - Key Questions
-  - Should ANY network connectivity be added to the tool at all?
-  - Should a user be able define their own personal list of marketplace URLs to facilitate browsing?
-  - Package manager format for artifact management?
+	- Defined globally, (`~/.config/artifactr/`), vault-scoped (`vault.yaml`), or have options for both?
+	- Should we be able to tie artifacts to specific tools?
+		- Presumably this is part of the intention behind **Vault → Tool Pairing**, so such a feature might be redundant.
+	- The addition of more artifact types might bloat the columnar output of `art tool list`.
 
 
+---
 
-# TUI
-- [ ] Eventual TUI frontend. Likely implemented with textual (if at all).
+## Someday Perhaps
+
+### Marketplace /  Plugin Parsing
+- A way to parse plugin / skill marketplace structures for artifacts
+	- e.g.
+		- claude marketplace format (https://code.claude.com/docs/en/plugin-marketplaces).
+		- plugin format https://code.claude.com/docs/en/plugins
+- Key Questions
+	- What other formats are worth parsing?
+	- Should a user be able define their own personal list of marketplace URLs/locations to facilitate browsing/search?
+		- Given all the open source skill/artifact sharing going on, there is potential here, ***but it goes against the no-network design.***
+		- This COULD just be a static list…
+	- Package manager format for artifact management?
+
+### TUI
+- A TUI frontend.
+- Supported through an `ssh` connection
+- Likely implemented with textual (if at all)
+
+### Full-fledged version control of artifacts
+- Could facilitate rolling back / testing particular versions of artifacts
+- Key Questions
+  - Would this be useful at all when most ppl would probably just use a git repo anyway?
