@@ -166,9 +166,58 @@ class ArtHelpFormatter(argparse.RawDescriptionHelpFormatter):
         return "usage: art [-h] [--version] <command> [<args>]\n\n"
 
 
-def create_parser() -> argparse.ArgumentParser:
+class ArtArgumentParser(argparse.ArgumentParser):
+    """ArgumentParser subclass with optional show-help-on-error behavior."""
+
+    def __init__(self, *args: Any, show_help_on_error: bool = False, **kwargs: Any) -> None:
+        self.show_help_on_error = show_help_on_error
+        super().__init__(*args, **kwargs)
+
+    def error(self, message: str) -> None:
+        if self.show_help_on_error:
+            self.print_help(sys.stderr)
+        super().error(message)
+
+
+def make_help(
+    summary: str,
+    aliases: list[str] | None = None,
+    workflows: str | None = None,
+    see_also: list[tuple[str, str]] | None = None,
+    notes: str | None = None,
+) -> dict:
+    """Build standardized help kwargs for add_parser() calls.
+
+    Returns a dict with description, epilog, and formatter_class keys suitable
+    for unpacking with ** into add_parser().
+    """
+    description = summary
+    if aliases:
+        description += f"\n\nAliases: {', '.join(aliases)}"
+
+    epilog_sections = []
+    if workflows:
+        epilog_sections.append(f"Workflows:\n  {workflows}")
+    if see_also:
+        lines = ["See Also:"]
+        for cmd, desc in see_also:
+            lines.append(f"  {cmd}  {desc}")
+        epilog_sections.append("\n".join(lines))
+    if notes:
+        epilog_sections.append(f"Notes:\n  {notes}")
+
+    epilog = "\n\n".join(epilog_sections) if epilog_sections else None
+
+    return {
+        "description": description,
+        "epilog": epilog,
+        "formatter_class": argparse.RawDescriptionHelpFormatter,
+    }
+
+
+def create_parser() -> ArtArgumentParser:
     """Create and configure the argument parser with all subcommands."""
-    parser = argparse.ArgumentParser(
+    parser = ArtArgumentParser(
         prog="art",
         description=(
             "Manage AI artifacts across multiple configurations, tools, & repositories.\n"
@@ -197,17 +246,28 @@ def create_parser() -> argparse.ArgumentParser:
         "--version", action="version", version=f"%(prog)s {__version__}"
     )
 
-    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+    subparsers = parser.add_subparsers(dest="command", help="Available commands", parser_class=ArtArgumentParser)
 
     # vault command with subcommands
     vault_parser = subparsers.add_parser(
         "vault", aliases=["v"], help="Manage vaults",
-        description="Manage artifact vaults — named directories that organize your skills, commands, and agents. Vaults can be shared across projects and referenced by name.",
+        show_help_on_error=True,
+        **make_help(
+            summary="Manage artifact vaults — named directories organizing your AI artifacts.",
+            aliases=["v"],
+        ),
     )
-    vault_subparsers = vault_parser.add_subparsers(dest="vault_command")
+    vault_subparsers = vault_parser.add_subparsers(dest="vault_command", parser_class=ArtArgumentParser)
 
-    # vault add
-    vault_add = vault_subparsers.add_parser("add", help="Add vaults to catalog")
+    # vault add (alphabetical: 1st)
+    vault_add = vault_subparsers.add_parser(
+        "add", help="Add vaults to catalog",
+        show_help_on_error=True,
+        **make_help(
+            summary="Add an existing vault directory to the catalog.",
+            notes="Paths must already exist on disk.",
+        ),
+    )
     vault_add.add_argument("paths", nargs="+", help="Vault paths to add")
     vault_add.add_argument(
         "--name", help="Name for the vault (only when adding a single vault)"
@@ -217,9 +277,15 @@ def create_parser() -> argparse.ArgumentParser:
         help="Set the added vault as the default",
     )
 
-    # vault init
+    # vault init (alphabetical: 2nd)
     vault_init = vault_subparsers.add_parser(
-        "init", aliases=["create", "cr"], help="Initialize a new vault directory"
+        "init", aliases=["create", "cr"], help="Initialize a new vault directory",
+        show_help_on_error=True,
+        **make_help(
+            summary="Create and register a new vault directory.",
+            aliases=["create", "cr"],
+            notes="Creates the directory if it does not exist.",
+        ),
     )
     vault_init.add_argument("target_dir", help="Path to the vault directory")
     vault_init.add_argument(
@@ -234,50 +300,60 @@ def create_parser() -> argparse.ArgumentParser:
         help="Auto-confirm directory creation without prompting",
     )
 
-    # vault rm
-    vault_rm = vault_subparsers.add_parser("rm", help="Remove vaults from catalog")
-    vault_rm.add_argument("paths", nargs="+", help="Vault paths to remove")
-
-    # vault name
-    vault_name = vault_subparsers.add_parser("name", help="Set or change a vault's name")
-    vault_name.add_argument("vault", help="Vault name or path to rename")
-    vault_name.add_argument("name", help="New name for the vault")
-
-    # vault select
-    vault_select = vault_subparsers.add_parser("select", help="Set default vault")
-    vault_select.add_argument("path", help="Vault name or path to set as default")
-
-    # vault ls
-    vault_list = vault_subparsers.add_parser("ls", aliases=["list"], help="List all vaults")
+    # vault ls (alphabetical: 3rd)
+    vault_list = vault_subparsers.add_parser(
+        "ls", aliases=["list"], help="List all vaults",
+        **make_help(
+            summary="List all vaults in the catalog.",
+            aliases=["list"],
+        ),
+    )
     vault_list.add_argument(
         "-a", "--all", action="store_true", dest="show_all",
         help="Show full vault hierarchy with artifacts",
     )
 
+    # vault name (alphabetical: 4th)
+    vault_name = vault_subparsers.add_parser(
+        "name", help="Set or change a vault's name",
+        show_help_on_error=True,
+        **make_help(summary="Set or change a vault's display name."),
+    )
+    vault_name.add_argument("vault", help="Vault name or path to rename")
+    vault_name.add_argument("name", help="New name for the vault")
+
+    # vault rm (alphabetical: 5th)
+    vault_rm = vault_subparsers.add_parser(
+        "rm", help="Remove vaults from catalog",
+        show_help_on_error=True,
+        **make_help(summary="Remove a vault from the catalog."),
+    )
+    vault_rm.add_argument("paths", nargs="+", help="Vault paths to remove")
+
+    # vault select (alphabetical: 6th)
+    vault_select = vault_subparsers.add_parser(
+        "select", help="Set default vault",
+        show_help_on_error=True,
+        **make_help(summary="Set the default vault."),
+    )
+    vault_select.add_argument("path", help="Vault name or path to set as default")
+
     # tool command with subcommands
     tool_parser = subparsers.add_parser(
         "tool", aliases=["t"], help="Manage tools",
-        description="Manage AI tool definitions. Tools describe where artifacts live in each tool's config structure (e.g., ~/.claude/commands/). Select a default tool or register custom ones.",
+        show_help_on_error=True,
+        **make_help(
+            summary="Manage AI tool definitions and their artifact directory mappings.",
+            aliases=["t"],
+        ),
     )
-    tool_subparsers = tool_parser.add_subparsers(dest="tool_command")
+    tool_subparsers = tool_parser.add_subparsers(dest="tool_command", parser_class=ArtArgumentParser)
 
-    # tool select
-    tool_select = tool_subparsers.add_parser("select", help="Set default tool")
-    tool_select.add_argument("name", help="Tool name")
-
-    # tool ls
-    tool_list = tool_subparsers.add_parser("ls", aliases=["list"], help="List supported tools")
-    tool_list.add_argument(
-        "-V", "--vault", action="append", default=None, dest="vaults",
-        help="Use tools from this vault — comma-separated or repeatable",
+    # tool add (alphabetical: 1st)
+    tool_add = tool_subparsers.add_parser(
+        "add", help="Add a custom tool definition",
+        **make_help(summary="Register a custom tool definition in the catalog."),
     )
-    tool_list.add_argument(
-        "-a", "--all", action="store_true", dest="show_all",
-        help="List tools from all catalog vaults and global config",
-    )
-
-    # tool add
-    tool_add = tool_subparsers.add_parser("add", help="Add a custom tool definition")
     tool_add.add_argument("name", help="Tool identifier")
     tool_add.add_argument("--skills", help="Repo-relative path for skills")
     tool_add.add_argument("--commands", help="Repo-relative path for commands")
@@ -298,17 +374,11 @@ def create_parser() -> argparse.ArgumentParser:
         help="Explicitly store in global config (default behavior)",
     )
 
-    # tool rm
-    tool_rm = tool_subparsers.add_parser("rm", help="Remove a custom tool definition")
-    tool_rm.add_argument("name", help="Tool identifier to remove")
-    tool_rm.add_argument("-V", "--vault", help="Remove from vault's metadata instead of global config")
-    tool_rm.add_argument(
-        "-g", "--global", action="store_true", dest="global_config",
-        help="Explicitly remove from global config (default behavior)",
+    # tool info (alphabetical: 2nd)
+    tool_info = tool_subparsers.add_parser(
+        "info", help="Show tool information and catalog",
+        **make_help(summary="Display tool configuration and catalog details."),
     )
-
-    # tool info
-    tool_info = tool_subparsers.add_parser("info", help="Show tool information and catalog")
     tool_info.add_argument("name", nargs="?", help="Tool identifier to display (omit for catalog view)")
     tool_info.add_argument(
         "-V", "--vault", action="append", default=None, dest="vaults",
@@ -323,10 +393,49 @@ def create_parser() -> argparse.ArgumentParser:
         help="Filter to global config tools only",
     )
 
+    # tool ls (alphabetical: 3rd)
+    tool_list = tool_subparsers.add_parser(
+        "ls", aliases=["list"], help="List supported tools",
+        **make_help(
+            summary="List all registered tools across sources.",
+            aliases=["list"],
+        ),
+    )
+    tool_list.add_argument(
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Use tools from this vault — comma-separated or repeatable",
+    )
+    tool_list.add_argument(
+        "-a", "--all", action="store_true", dest="show_all",
+        help="List tools from all catalog vaults and global config",
+    )
+
+    # tool rm (alphabetical: 4th)
+    tool_rm = tool_subparsers.add_parser(
+        "rm", help="Remove a custom tool definition",
+        **make_help(summary="Remove a custom tool definition from the catalog."),
+    )
+    tool_rm.add_argument("name", help="Tool identifier to remove")
+    tool_rm.add_argument("-V", "--vault", help="Remove from vault's metadata instead of global config")
+    tool_rm.add_argument(
+        "-g", "--global", action="store_true", dest="global_config",
+        help="Explicitly remove from global config (default behavior)",
+    )
+
+    # tool select (alphabetical: 5th)
+    tool_select = tool_subparsers.add_parser(
+        "select", help="Set default tool",
+        **make_help(summary="Set the default tool."),
+    )
+    tool_select.add_argument("name", help="Tool name")
+
     # ls command (vault-side)
     list_parser = subparsers.add_parser(
         "ls", aliases=["list"], help="List artifacts in a vault",
-        description="List artifacts stored in a vault. Shows skills, commands, and agents with their types and descriptions. Targets the default vault unless --vault is specified.",
+        **make_help(
+            summary="List artifacts stored in a vault.",
+            aliases=["list"],
+        ),
     )
     list_parser.add_argument(
         "-V", "--vault", action="append", default=None, dest="vaults",
@@ -337,7 +446,8 @@ def create_parser() -> argparse.ArgumentParser:
     # rm command (vault-side)
     rm_parser = subparsers.add_parser(
         "rm", help="Remove artifacts from a vault",
-        description="Remove artifacts from a vault by name. Supports type/name prefix syntax (e.g., skill/my-skill). Asks for confirmation unless --force is used.",
+        show_help_on_error=True,
+        **make_help(summary="Remove artifacts from a vault by name."),
     )
     rm_parser.add_argument(
         "names", nargs="+", help="Artifact names to remove (supports type/name prefix)"
@@ -353,7 +463,10 @@ def create_parser() -> argparse.ArgumentParser:
     # spelunk command
     spelunk_parser = subparsers.add_parser(
         "spelunk", aliases=["sp"], help="Discover artifacts in a directory, vault, or global config",
-        description="Discover and display artifacts in a directory, vault, or your global tool configs. Useful for seeing what's available before importing or storing. Defaults to scanning global config directories if no target is given.",
+        **make_help(
+            summary="Discover artifacts in a directory, vault, or global config.",
+            aliases=["sp"],
+        ),
     )
     spelunk_parser.add_argument("target", nargs="?", default=None, help="Path to directory to probe")
     spelunk_parser.add_argument(
@@ -376,13 +489,22 @@ def create_parser() -> argparse.ArgumentParser:
     # project namespace (art project / art proj)
     project_parser = subparsers.add_parser(
         "project", aliases=["proj", "p"], help="Project-side artifact operations",
-        description="Manage artifacts within a project. Import from vaults, remove imported artifacts, or list what's been imported. Commands target the current directory unless --target is specified.",
+        show_help_on_error=True,
+        **make_help(
+            summary="Manage artifacts within a project (import, list, remove, link).",
+            aliases=["proj", "p"],
+        ),
     )
-    proj_subparsers = project_parser.add_subparsers(dest="proj_command")
+    proj_subparsers = project_parser.add_subparsers(dest="proj_command", parser_class=ArtArgumentParser)
 
-    # proj import
+    # proj import (alphabetical: 1st)
     proj_import = proj_subparsers.add_parser(
-        "import", help="Import artifacts from vault into a project"
+        "import", help="Import artifacts from vault into a project",
+        **make_help(
+            summary="Copy or symlink vault artifacts into a project directory.",
+            workflows="art proj import → art proj link → art proj unlink",
+            see_also=[("art config import", "Same operation targeting global tool config dirs")],
+        ),
     )
     proj_import.add_argument(
         "target", nargs="?", default=None, help="Path to target git repository (default: cwd)"
@@ -415,66 +537,15 @@ def create_parser() -> argparse.ArgumentParser:
     )
     add_type_filter_args(proj_import)
 
-    # proj rm
-    proj_rm = proj_subparsers.add_parser(
-        "rm", help="Remove imported artifacts from a project"
-    )
-    proj_rm.add_argument("names", nargs="+", help="Artifact names to remove")
-    proj_rm.add_argument(
-        "--target", default=None, help="Project path (default: cwd)",
-    )
-    proj_rm.add_argument(
-        "--tools", help="Comma-separated tool filter",
-    )
-    proj_rm.add_argument(
-        "-V", "--vault", action="append", default=None, dest="vaults",
-        help="Filter by vault — comma-separated or repeatable",
-    )
-    proj_rm.add_argument(
-        "-f", "--force", action="store_true",
-        help="Skip confirmation prompt",
-    )
-    add_type_filter_args(proj_rm, allow_names=False)
-
-    # proj wipe
-    proj_wipe = proj_subparsers.add_parser(
-        "wipe", help="Clear all imported artifacts from a project"
-    )
-    proj_wipe.add_argument(
-        "--target", default=None, help="Project path (default: cwd)",
-    )
-    proj_wipe.add_argument(
-        "--tools", help="Comma-separated tool filter",
-    )
-    proj_wipe.add_argument(
-        "-V", "--vault", action="append", default=None, dest="vaults",
-        help="Filter by vault — comma-separated or repeatable",
-    )
-    proj_wipe.add_argument(
-        "-f", "--force", action="store_true",
-        help="Skip confirmation prompt",
-    )
-    add_type_filter_args(proj_wipe)
-
-    # proj ls
-    proj_list = proj_subparsers.add_parser(
-        "ls", aliases=["list"], help="Show imported artifacts in a project"
-    )
-    proj_list.add_argument(
-        "--target", default=None, help="Project path (default: cwd)",
-    )
-    proj_list.add_argument(
-        "--tools", help="Comma-separated tool filter",
-    )
-    proj_list.add_argument(
-        "-V", "--vault", action="append", default=None, dest="vaults",
-        help="Filter by vault — comma-separated or repeatable",
-    )
-    add_type_filter_args(proj_list)
-
-    # proj link
+    # proj link (alphabetical: 2nd)
     proj_link = proj_subparsers.add_parser(
-        "link", aliases=["ln"], help="Link imported artifacts to vault sources (symlink)"
+        "link", aliases=["ln"], help="Link imported artifacts to vault sources (symlink)",
+        **make_help(
+            summary="Convert imported copies to symlinks pointing at vault sources.",
+            aliases=["ln"],
+            workflows="art proj import → art proj link → art proj unlink",
+            see_also=[("art proj unlink", "Replace symlinks with copies")],
+        ),
     )
     proj_link.add_argument("names", nargs="*", help="Artifact names or glob patterns")
     proj_link.add_argument(
@@ -494,9 +565,56 @@ def create_parser() -> argparse.ArgumentParser:
     )
     add_type_filter_args(proj_link, allow_names=False)
 
-    # proj unlink
+    # proj ls (alphabetical: 3rd)
+    proj_list = proj_subparsers.add_parser(
+        "ls", aliases=["list"], help="Show imported artifacts in a project",
+        **make_help(
+            summary="List artifacts imported into this project.",
+            aliases=["list"],
+        ),
+    )
+    proj_list.add_argument(
+        "--target", default=None, help="Project path (default: cwd)",
+    )
+    proj_list.add_argument(
+        "--tools", help="Comma-separated tool filter",
+    )
+    proj_list.add_argument(
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Filter by vault — comma-separated or repeatable",
+    )
+    add_type_filter_args(proj_list)
+
+    # proj rm (alphabetical: 4th)
+    proj_rm = proj_subparsers.add_parser(
+        "rm", help="Remove imported artifacts from a project",
+        **make_help(summary="Remove specific imported artifacts from a project."),
+    )
+    proj_rm.add_argument("names", nargs="+", help="Artifact names to remove")
+    proj_rm.add_argument(
+        "--target", default=None, help="Project path (default: cwd)",
+    )
+    proj_rm.add_argument(
+        "--tools", help="Comma-separated tool filter",
+    )
+    proj_rm.add_argument(
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Filter by vault — comma-separated or repeatable",
+    )
+    proj_rm.add_argument(
+        "-f", "--force", action="store_true",
+        help="Skip confirmation prompt",
+    )
+    add_type_filter_args(proj_rm, allow_names=False)
+
+    # proj unlink (alphabetical: 5th)
     proj_unlink = proj_subparsers.add_parser(
-        "unlink", aliases=["uln"], help="Unlink artifacts (replace symlinks with copies)"
+        "unlink", aliases=["uln"], help="Unlink artifacts (replace symlinks with copies)",
+        **make_help(
+            summary="Replace symlinks with standalone copies.",
+            aliases=["uln"],
+            see_also=[("art proj link", "Convert copies to symlinks")],
+        ),
     )
     proj_unlink.add_argument("names", nargs="*", help="Artifact names or glob patterns")
     proj_unlink.add_argument(
@@ -512,17 +630,59 @@ def create_parser() -> argparse.ArgumentParser:
     )
     add_type_filter_args(proj_unlink, allow_names=False)
 
+    # proj wipe (alphabetical: 6th)
+    proj_wipe = proj_subparsers.add_parser(
+        "wipe", help="Clear all imported artifacts from a project",
+        **make_help(
+            summary="Remove all imported artifacts and clear the import cache.",
+            notes="Removes all imported artifacts and clears the import cache.",
+        ),
+    )
+    proj_wipe.add_argument(
+        "--target", default=None, help="Project path (default: cwd)",
+    )
+    proj_wipe.add_argument(
+        "--tools", help="Comma-separated tool filter",
+    )
+    proj_wipe.add_argument(
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Filter by vault — comma-separated or repeatable",
+    )
+    proj_wipe.add_argument(
+        "-f", "--force", action="store_true",
+        help="Skip confirmation prompt",
+    )
+    add_type_filter_args(proj_wipe)
+
     # config namespace (art config / art conf)
     config_parser = subparsers.add_parser(
         "config", aliases=["conf", "c"],
         help="Tool-specific global configs & artifactr settings",
-        description="Manage tool-specific global config directories and artifactr's own settings. Use 'import' to copy artifacts into your tools' global config folders (e.g., ~/.claude/commands/). Use 'edit' to open artifactr's own global YAML configuration.",
+        show_help_on_error=True,
+        **make_help(
+            summary="Manage tool-specific global configs and artifactr settings.",
+            aliases=["conf", "c"],
+        ),
     )
-    conf_subparsers = config_parser.add_subparsers(dest="conf_command")
+    conf_subparsers = config_parser.add_subparsers(dest="conf_command", parser_class=ArtArgumentParser)
 
-    # conf import
+    # conf edit (alphabetical: 1st)
+    conf_subparsers.add_parser(
+        "edit", aliases=["ed"], help="Open artifactr's global YAML config in editor",
+        **make_help(
+            summary="Open artifactr's global YAML configuration in your editor.",
+            aliases=["ed"],
+            see_also=[("art tool add", "Add a custom tool to the config")],
+        ),
+    )
+
+    # conf import (alphabetical: 2nd)
     conf_import = conf_subparsers.add_parser(
-        "import", help="Import artifacts into tool-specific global config directories (e.g., ~/.claude/commands/)"
+        "import", help="Import artifacts into tool-specific global config directories (e.g., ~/.claude/commands/)",
+        **make_help(
+            summary="Copy or symlink vault artifacts into global tool config directories.",
+            see_also=[("art proj import", "Same operation targeting a project directory")],
+        ),
     )
     conf_import.add_argument(
         "-V", "--vault", action="append", default=None, dest="vaults",
@@ -544,57 +704,13 @@ def create_parser() -> argparse.ArgumentParser:
     )
     add_type_filter_args(conf_import)
 
-    # conf rm
-    conf_rm = conf_subparsers.add_parser(
-        "rm", help="Remove globally imported artifacts"
-    )
-    conf_rm.add_argument("names", nargs="+", help="Artifact names to remove")
-    conf_rm.add_argument(
-        "--tools", help="Comma-separated tool filter",
-    )
-    conf_rm.add_argument(
-        "-V", "--vault", action="append", default=None, dest="vaults",
-        help="Filter by vault — comma-separated or repeatable",
-    )
-    conf_rm.add_argument(
-        "-f", "--force", action="store_true",
-        help="Skip confirmation prompt",
-    )
-    add_type_filter_args(conf_rm, allow_names=False)
-
-    # conf wipe
-    conf_wipe = conf_subparsers.add_parser(
-        "wipe", help="Clear all globally imported artifacts"
-    )
-    conf_wipe.add_argument(
-        "--tools", help="Comma-separated tool filter",
-    )
-    conf_wipe.add_argument(
-        "-V", "--vault", action="append", default=None, dest="vaults",
-        help="Filter by vault — comma-separated or repeatable",
-    )
-    conf_wipe.add_argument(
-        "-f", "--force", action="store_true",
-        help="Skip confirmation prompt",
-    )
-    add_type_filter_args(conf_wipe)
-
-    # conf ls
-    conf_list = conf_subparsers.add_parser(
-        "ls", aliases=["list"], help="Show globally imported artifacts"
-    )
-    conf_list.add_argument(
-        "--tools", help="Comma-separated tool filter",
-    )
-    conf_list.add_argument(
-        "-V", "--vault", action="append", default=None, dest="vaults",
-        help="Filter by vault — comma-separated or repeatable",
-    )
-    add_type_filter_args(conf_list)
-
-    # conf link
+    # conf link (alphabetical: 3rd)
     conf_link = conf_subparsers.add_parser(
-        "link", aliases=["ln"], help="Link globally imported artifacts to vault sources (symlink)"
+        "link", aliases=["ln"], help="Link globally imported artifacts to vault sources (symlink)",
+        **make_help(
+            summary="Convert globally imported copies to symlinks.",
+            aliases=["ln"],
+        ),
     )
     conf_link.add_argument("names", nargs="*", help="Artifact names or glob patterns")
     conf_link.add_argument(
@@ -611,9 +727,49 @@ def create_parser() -> argparse.ArgumentParser:
     )
     add_type_filter_args(conf_link, allow_names=False)
 
-    # conf unlink
+    # conf ls (alphabetical: 4th)
+    conf_list = conf_subparsers.add_parser(
+        "ls", aliases=["list"], help="Show globally imported artifacts",
+        **make_help(
+            summary="List artifacts imported into global tool config directories.",
+            aliases=["list"],
+        ),
+    )
+    conf_list.add_argument(
+        "--tools", help="Comma-separated tool filter",
+    )
+    conf_list.add_argument(
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Filter by vault — comma-separated or repeatable",
+    )
+    add_type_filter_args(conf_list)
+
+    # conf rm (alphabetical: 5th)
+    conf_rm = conf_subparsers.add_parser(
+        "rm", help="Remove globally imported artifacts",
+        **make_help(summary="Remove specific globally imported artifacts."),
+    )
+    conf_rm.add_argument("names", nargs="+", help="Artifact names to remove")
+    conf_rm.add_argument(
+        "--tools", help="Comma-separated tool filter",
+    )
+    conf_rm.add_argument(
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Filter by vault — comma-separated or repeatable",
+    )
+    conf_rm.add_argument(
+        "-f", "--force", action="store_true",
+        help="Skip confirmation prompt",
+    )
+    add_type_filter_args(conf_rm, allow_names=False)
+
+    # conf unlink (alphabetical: 6th)
     conf_unlink = conf_subparsers.add_parser(
-        "unlink", aliases=["uln"], help="Unlink globally imported artifacts (replace symlinks with copies)"
+        "unlink", aliases=["uln"], help="Unlink globally imported artifacts (replace symlinks with copies)",
+        **make_help(
+            summary="Replace global symlinks with standalone copies.",
+            aliases=["uln"],
+        ),
     )
     conf_unlink.add_argument("names", nargs="*", help="Artifact names or glob patterns")
     conf_unlink.add_argument(
@@ -626,13 +782,31 @@ def create_parser() -> argparse.ArgumentParser:
     )
     add_type_filter_args(conf_unlink, allow_names=False)
 
-    # conf edit
-    conf_subparsers.add_parser("edit", aliases=["ed"], help="Open artifactr's global YAML config in editor")
+    # conf wipe (alphabetical: 7th)
+    conf_wipe = conf_subparsers.add_parser(
+        "wipe", help="Clear all globally imported artifacts",
+        **make_help(summary="Remove all globally imported artifacts and clear the global cache."),
+    )
+    conf_wipe.add_argument(
+        "--tools", help="Comma-separated tool filter",
+    )
+    conf_wipe.add_argument(
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Filter by vault — comma-separated or repeatable",
+    )
+    conf_wipe.add_argument(
+        "-f", "--force", action="store_true",
+        help="Skip confirmation prompt",
+    )
+    add_type_filter_args(conf_wipe)
 
     # store command
     store_parser = subparsers.add_parser(
         "store", aliases=["st"], help="Store artifacts from a directory into a vault",
-        description="Discover artifacts in a directory and store them into a vault. Presents an interactive selection menu to choose which artifacts to store. Use --force to overwrite existing artifacts without prompting. Type filters (-S, -C, -A) narrow which artifacts are discovered.",
+        **make_help(
+            summary="Discover and store artifacts from a directory into a vault.",
+            aliases=["st"],
+        ),
     )
     store_parser.add_argument("target_dir", nargs="?", default=None, help="Path to directory containing artifacts")
     store_parser.add_argument(
@@ -655,7 +829,11 @@ def create_parser() -> argparse.ArgumentParser:
     # edit command
     edit_parser = subparsers.add_parser(
         "edit", aliases=["ed"], help="Edit an artifact in your editor",
-        description="Open an artifact's markdown file in your terminal editor. Targets the default vault unless --vault or --here is specified. Supports short type aliases: s (skill), c (command), a (agent).",
+        show_help_on_error=True,
+        **make_help(
+            summary="Open an artifact's file in your editor.",
+            aliases=["ed"],
+        ),
     )
     edit_parser.add_argument(
         "artifact_type", choices=["skill", "s", "agent", "a", "agt", "ag", "command", "c", "cmd", "com", "sk"],
@@ -679,77 +857,22 @@ def create_parser() -> argparse.ArgumentParser:
     # create command with subcommands
     create_parser = subparsers.add_parser(
         "create", aliases=["cr"], help="Create new artifacts",
-        description="Create new artifacts from the command line. Specify the type (skill, command, or agent) and provide a description. Targets the default vault unless --vault or --here is specified.",
+        show_help_on_error=True,
+        **make_help(
+            summary="Create new skills, commands, or agents from the command line.",
+            aliases=["cr"],
+        ),
     )
-    create_subparsers = create_parser.add_subparsers(dest="create_command")
+    create_subparsers = create_parser.add_subparsers(dest="create_command", parser_class=ArtArgumentParser)
 
-    # create skill
-    create_skill_parser = create_subparsers.add_parser(
-        "skill", aliases=["s", "sk"], help="Create a new skill"
-    )
-    create_skill_parser.add_argument(
-        "skill_name", help="Skill identifier (directory name)"
-    )
-    create_skill_parser.add_argument(
-        "-n", "--name", dest="display_name",
-        help="Override the frontmatter display name",
-    )
-    create_skill_parser.add_argument(
-        "-d", "--description", help="Skill description",
-    )
-    create_skill_parser.add_argument(
-        "-c", "--content", help="Markdown body content",
-    )
-    create_skill_parser.add_argument(
-        "-D", "--field", action="append", default=[],
-        help="Additional frontmatter field as key=value (repeatable)",
-    )
-    create_skill_parser.add_argument(
-        "-H", "--here", action="store_true",
-        help="Create in current project instead of vault",
-    )
-    create_skill_parser.add_argument(
-        "-V", "--vault", action="append", default=None, dest="vaults",
-        help="Target vault — comma-separated or repeatable (name or path)",
-    )
-    create_skill_parser.add_argument(
-        "--tools",
-        help="Comma-separated tool list (used with --here)",
-    )
-
-    # create command
-    create_command_parser = create_subparsers.add_parser(
-        "command", aliases=["c", "cmd", "com"], help="Create a new command"
-    )
-    create_command_parser.add_argument(
-        "command_name", help="Command identifier (filename)"
-    )
-    create_command_parser.add_argument(
-        "-d", "--description", help="Command description",
-    )
-    create_command_parser.add_argument(
-        "-c", "--content", help="Markdown body content",
-    )
-    create_command_parser.add_argument(
-        "-D", "--field", action="append", default=[],
-        help="Additional frontmatter field as key=value (repeatable)",
-    )
-    create_command_parser.add_argument(
-        "-H", "--here", action="store_true",
-        help="Create in current project instead of vault",
-    )
-    create_command_parser.add_argument(
-        "-V", "--vault", action="append", default=None, dest="vaults",
-        help="Target vault — comma-separated or repeatable (name or path)",
-    )
-    create_command_parser.add_argument(
-        "--tools",
-        help="Comma-separated tool list (used with --here)",
-    )
-
-    # create agent
+    # create agent (alphabetical: 1st)
     create_agent_parser = create_subparsers.add_parser(
-        "agent", aliases=["a", "agt", "ag"], help="Create a new agent"
+        "agent", aliases=["a", "agt", "ag"], help="Create a new agent",
+        show_help_on_error=True,
+        **make_help(
+            summary="Create a new agent artifact.",
+            aliases=["a", "agt", "ag"],
+        ),
     )
     create_agent_parser.add_argument(
         "agent_name", help="Agent identifier"
@@ -777,6 +900,80 @@ def create_parser() -> argparse.ArgumentParser:
         help="Target vault — comma-separated or repeatable (name or path)",
     )
     create_agent_parser.add_argument(
+        "--tools",
+        help="Comma-separated tool list (used with --here)",
+    )
+
+    # create command (alphabetical: 2nd)
+    create_command_parser = create_subparsers.add_parser(
+        "command", aliases=["c", "cmd", "com"], help="Create a new command",
+        show_help_on_error=True,
+        **make_help(
+            summary="Create a new command artifact.",
+            aliases=["c", "cmd", "com"],
+        ),
+    )
+    create_command_parser.add_argument(
+        "command_name", help="Command identifier (filename)"
+    )
+    create_command_parser.add_argument(
+        "-d", "--description", help="Command description",
+    )
+    create_command_parser.add_argument(
+        "-c", "--content", help="Markdown body content",
+    )
+    create_command_parser.add_argument(
+        "-D", "--field", action="append", default=[],
+        help="Additional frontmatter field as key=value (repeatable)",
+    )
+    create_command_parser.add_argument(
+        "-H", "--here", action="store_true",
+        help="Create in current project instead of vault",
+    )
+    create_command_parser.add_argument(
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Target vault — comma-separated or repeatable (name or path)",
+    )
+    create_command_parser.add_argument(
+        "--tools",
+        help="Comma-separated tool list (used with --here)",
+    )
+
+    # create skill (alphabetical: 3rd)
+    create_skill_parser = create_subparsers.add_parser(
+        "skill", aliases=["s", "sk"], help="Create a new skill",
+        show_help_on_error=True,
+        **make_help(
+            summary="Create a new skill artifact.",
+            aliases=["s", "sk"],
+        ),
+    )
+    create_skill_parser.add_argument(
+        "skill_name", help="Skill identifier (directory name)"
+    )
+    create_skill_parser.add_argument(
+        "-n", "--name", dest="display_name",
+        help="Override the frontmatter display name",
+    )
+    create_skill_parser.add_argument(
+        "-d", "--description", help="Skill description",
+    )
+    create_skill_parser.add_argument(
+        "-c", "--content", help="Markdown body content",
+    )
+    create_skill_parser.add_argument(
+        "-D", "--field", action="append", default=[],
+        help="Additional frontmatter field as key=value (repeatable)",
+    )
+    create_skill_parser.add_argument(
+        "-H", "--here", action="store_true",
+        help="Create in current project instead of vault",
+    )
+    create_skill_parser.add_argument(
+        "-V", "--vault", action="append", default=None, dest="vaults",
+        help="Target vault — comma-separated or repeatable (name or path)",
+    )
+    create_skill_parser.add_argument(
         "--tools",
         help="Comma-separated tool list (used with --here)",
     )
@@ -3169,7 +3366,7 @@ def _main() -> int:
     if args.command in ("project", "proj", "p"):
         proj_cmd = getattr(args, "proj_command", None)
         if proj_cmd is None:
-            parser.parse_args(["project", "--help"])
+            parser.parse_args([args.command, "--help"])
             return 0
         if proj_cmd == "import":
             return handle_proj_import(args)
@@ -3187,7 +3384,7 @@ def _main() -> int:
     if args.command in ("config", "conf", "c"):
         conf_cmd = getattr(args, "conf_command", None)
         if conf_cmd is None:
-            parser.parse_args(["config", "--help"])
+            parser.parse_args([args.command, "--help"])
             return 0
         if conf_cmd == "import":
             return handle_conf_import(args)
@@ -3206,7 +3403,7 @@ def _main() -> int:
 
     if args.command in ("vault", "v"):
         if args.vault_command is None:
-            parser.parse_args(["vault", "--help"])
+            parser.parse_args([args.command, "--help"])
             return 0
 
         if args.vault_command == "add":
@@ -3224,7 +3421,7 @@ def _main() -> int:
 
     if args.command in ("tool", "t"):
         if args.tool_command is None:
-            parser.parse_args(["tool", "--help"])
+            parser.parse_args([args.command, "--help"])
             return 0
 
         if args.tool_command == "select":
@@ -3249,7 +3446,7 @@ def _main() -> int:
 
     if args.command in ("create", "cr"):
         if args.create_command is None:
-            parser.parse_args(["create", "--help"])
+            parser.parse_args([args.command, "--help"])
             return 0
 
         if args.create_command in ("skill", "s", "sk"):

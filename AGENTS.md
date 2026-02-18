@@ -97,9 +97,23 @@ Supports both legacy (no headers) and v2 format via `_parse_cache_file()`.
 
 - **Type hints on every function**.
 - **CLI aliases**: `-V`/`--vault` accepts comma-separated or repeated flags; extensive short aliases (`s`/`sk` skill, `c`/`cmd` command, `a`/`agt` agent; `cr` create, `ed` edit, `sp` spelunk, `st` store, `v` vault, `p`/`proj` project)
+- **Alias maintenance**: When adding, changing, or removing command aliases, both the argparse `aliases=` and the `make_help(aliases=...)` call must be updated. The `--help` output is the user-facing source of truth for discoverability.
 - **Windows symlink fallback**: `create_link()` falls back to hard links when symlinks fail (requires both files on same volume)
 - **Frontmatter search**: Edit-by-name falls back to scanning `.md` files for `name:` YAML frontmatter if direct path lookup fails
 - **Spec-driven dev**: Features are developed against specs in `openspec/changes/`. openspec tools are used in this repo.
+
+## Help Text Format
+
+Every `add_parser()` call uses `**make_help(...)` to produce consistent help output. `make_help()` is defined in `cli.py` and returns `description`, `epilog`, and `formatter_class` kwargs.
+
+**Parameters:**
+- `summary` (required): 1–2 sentence description of the command. Appears as the first paragraph in `--help`.
+- `aliases` (optional): List of argparse aliases for this parser. Displayed as "Aliases: x, y" in the description block.
+- `workflows` (optional): Step sequence string using `→` separator. Rendered under a "Workflows:" header in the epilog.
+- `see_also` (optional): List of `(command, description)` tuples for laterally related commands. Rendered under "See Also:" in the epilog.
+- `notes` (optional): 1–2 sentence caveat or important default. Rendered under "Notes:" in the epilog.
+
+**Rendered sections** (epilog, separated by blank lines): Workflows → See Also → Notes.
 
 ## Key Workflows
 
