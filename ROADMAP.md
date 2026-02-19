@@ -5,36 +5,20 @@ Stuff under "Planned" will definitely be shipped.
 
 ## Planned
 
-### Misc. Vault Operations
-- Copying artifacts from one vault to another
-- Duplicating (making a copy of) a vault
+### Documentation
+- Add better documentation apart from the README.
 
-### Full-fledged Skill Editing/Creation
-- Ability to CRUD all files/folders within a skill.
+### Backups
+- Backup format for:
+  - Vault Catalog
+  - Program configuration
 
-### Navigation
-- Ability to `cd` into a target vault/artifact (likely skill) directory without the full filepath
-
-### Catalog Management
-> *"**Catalog**" is the standard term referring to an entire collection of vaults.*
-
-- Support for exporting any number of vaults to a directory (as a folder/zip archive/etc)
-- Import an entire **catalog** (of potentially many many vaults) with 1 command
-
-### `spelunk` minor updates
-- Output should list the specific location (project/directory) artifacts are found
-
+### Output Formats
+- Add json/yaml/markdown output formats to more commands than just `art spelunk`.
 
 ---
 
 ## Exploring
-
-### Exporting Artifacts
-- Easily export artifacts (most likely to be skills) as a zip archive.
-  - Singular or sets of artifacts
-- Key Questions
-  - What archive format & folder structure do common tools accept as importable? What artifact types do they support?
-
 
 ### Vault → Tool Pairing
 - Ability to explicitly "pair" a vault with an intended agentic tool.
@@ -45,8 +29,9 @@ Stuff under "Planned" will definitely be shipped.
 	- Would this pairing override the selected default tool when using a certain vault?
 	    - Potentially, this setting would override any default tool during multi-vault operations, unless a specific tool is defined with `--tools`
 
+### Artifact Types
 
-### Other Potential Built-in Artifact Types
+#### Other Potential Built-in Artifact Types
 - Scripts
   - Would these be import-able into skills?
 - Hooks (event handlers)
@@ -54,13 +39,7 @@ Stuff under "Planned" will definitely be shipped.
   - This doesn't seem terribly useful, as AGENTS.md is usually project-specific.
   - Is Vault -> Project pairing a good idea?
 
-### Backups
-- Backups for:
-  - Vault Catalog
-  - Program configuration
-
-
-### Custom Artifact Types
+#### Custom Artifact Types
 Not all agentic tools support the same artifact types. And there are frequently new formats and standards popping up.
 
 - Ability to configure custom artifact types.
@@ -69,6 +48,8 @@ Not all agentic tools support the same artifact types. And there are frequently 
 	- Should we be able to tie artifacts to specific tools?
 		- Presumably this is part of the intention behind **Vault → Tool Pairing**, so such a feature might be redundant.
 	- The addition of more artifact types might bloat the columnar output of `art tool list`.
+
+#### Converting an artifact between types
 
 
 ### Recursive AGENTS.md linking
@@ -89,6 +70,7 @@ Not all agentic tools support the same artifact types. And there are frequently 
 
 ### Artifact Security Scanning
 
+
 ### Marketplace /  Plugin Parsing
 - A way to parse plugin / skill marketplace structures for artifacts
 	- e.g.
@@ -103,12 +85,10 @@ Not all agentic tools support the same artifact types. And there are frequently 
 
 ### TUI
 - A TUI frontend.
-- Supported through an `ssh` connection
+- Still usable through an `ssh` connection
 - Likely implemented with textual (if at all)
 
 ### Full-fledged version control of artifacts
 - Could facilitate rolling back / testing particular versions of artifacts
 - Key Questions
   - Would this be useful at all when most ppl would probably just use a git repo anyway?
-
-### Converting an artifact between types

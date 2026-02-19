@@ -1,27 +1,28 @@
 # Artifactr
 
-A cross-platform CLI tool for managing AI project artifacts. Maintain a personal library of skills, agents, and commands in centralized "vaults" and import them into any project or tool configuration for use with AI coding assistants.
+Cross-platform CLI for managing AI skills, commands, agents, and other ***Artifacts***. Maintain a library in centralized ***Vaults*** and import them into any project or tool config for use with AI coding assistants.
 
 ### Philosophy
-- Local-first. No network functionality at all.
-- Extensible. Easily add support for your coding agent with a simple yaml configuration.
-- Portable. Cross-platform support (Linux/Mac/Win).
-- Easy to install, easy to export your artifacts/configuration.
+- All you need is a **terminal**.
+- **Local-first**. No network functionality at all.
+- **Extensible**. Easily add support for your coding agent with a simple yaml configuration.
+- **Portable**. Cross-platform support (Linux/Mac/Win).
+- **Simple**. Easy to install, easy to export your artifacts/configuration.
+- **Conventional**. Command syntax attempts to feel familiar by aligning with existing conventions.
 
 [Installation](#installation) •
 [Quickstart](#quickstart) •
 [The Essentials](#the-essentials) •
-[Extended Usage](#extended-usage) •
-[Vault Structure](#vault-structure)
+[Extended Usage](#extended-usage)
 
 ## *Why?* 🤔
-AI coding agents accumulate configs — skills, agents, commands — and they're usually project-local. Starting a new repo often means rebuilding your environment from scratch.
+AI coding agents accumulate a bunch of configs. And they're usually project-local. Starting a new repo often means rebuilding your environment from scratch, manually copy-pasting skills, etc.
 
 I develop mostly in cloud VMs via `ssh` and `tmux` for security purposes. I got tired of rebuilding my setup every time and desperately wanted a *terminal-centric* solution. Lo-and-behold: **Artifactr**
 
 It takes inspiration from local-first note-taking applications like Obsidian and Logseq. No external connections are made. Your vaults contain YOUR files.
 
-Vaults are where you store *artifacts*. "Artifact" is a shorter way of saying "a file or folder used with LLM tools." Currently, the tool supports standard **Skills**, **Commands**, and **Agents**.
+**Vaults** are where you store **Artifacts**. "Artifact" is a shorter way of saying "a file or folder used with LLM tools." Currently, `artifactr` supports standard **Skills**, **Commands**, and **Agents**.
 
 ![demo1](https://raw.githubusercontent.com/reg1z/media-assets/refs/heads/main/artifactr/demo1.gif)
 
@@ -32,6 +33,9 @@ Vaults are where you store *artifacts*. "Artifact" is a shorter way of saying "a
 
 - [Why?](#why-)
 - [Installation](#installation)
+  - [Linux & macOS](#linux--macos)
+  - [Windows](#windows)
+  - [Manual Installation](#manual-installation)
 - [Quickstart](#quickstart)
 - [The Essentials](#the-essentials)
   - [Creating a New Vault](#creating-a-new-vault)
@@ -40,12 +44,19 @@ Vaults are where you store *artifacts*. "Artifact" is a shorter way of saying "a
   - [Spelunk For and Store Artifacts](#spelunk-for-and-store-artifacts)
   - [Removing Artifacts](#removing-artifacts)
   - [Importing Artifacts](#importing-artifacts)
-  - [Syncing Artifacts Automatically](#syncing-artifacts-automatically)
+    - [Syncing Artifacts Automatically](#syncing-artifacts-automatically)
   - [Editing Artifacts - art edit](#editing-artifacts---art-edit)
   - [Creating Artifacts - art create](#creating-artifacts---art-create)
+    - [Creating Skills](#creating-skills)
+    - [Creating Commands](#creating-commands)
+    - [Creating Agents](#creating-agents)
   - [Managing Tools](#managing-tools)
+    - [Adding a Custom Tool](#adding-a-custom-tool)
+  - [Vault Structure](#vault-structure)
 - [Extended Usage](#extended-usage)
   - [Managing Vaults](#managing-vaults)
+  - [Vault Export & Import](#vault-export--import)
+  - [Shell Navigation](#shell-navigation)
   - [Managing Tools](#managing-tools-1)
   - [Listing Vault Contents](#listing-vault-contents)
   - [Removing Vault Artifacts](#removing-vault-artifacts)
@@ -60,9 +71,13 @@ Vaults are where you store *artifacts*. "Artifact" is a shorter way of saying "a
   - [Link State Display](#link-state-display)
   - [Creating Artifacts](#creating-artifacts)
   - [Editing Artifacts](#editing-artifacts)
+  - [Listing Artifact Files](#listing-artifact-files)
+  - [Reading Artifact Content](#reading-artifact-content)
+  - [Inspecting Artifacts](#inspecting-artifacts)
+  - [Exporting Artifacts](#exporting-artifacts)
+  - [Copying Artifacts](#copying-artifacts)
   - [Discovering Artifacts](#discovering-artifacts)
   - [Storing Artifacts](#storing-artifacts)
-- [Vault Structure](#vault-structure)
 
 </details>
 
@@ -70,6 +85,47 @@ Vaults are where you store *artifacts*. "Artifact" is a shorter way of saying "a
 ## Installation
 Requires Python 3.10+
 
+One-liners will attempt to install `artifactr` via pipx, otherwise, they will create a new venv, install the program there, and add it to your `$PATH`.
+
+### Linux & macOS
+Install artifactr with a single command on Linux or macOS:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/reg1z/artifactr/main/install.sh | bash
+```
+
+To skip all confirmation prompts (useful for scripts or dotfiles):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/reg1z/artifactr/main/install.sh | bash -s -- --yes
+```
+
+To uninstall:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/reg1z/artifactr/main/install.sh | bash -s -- --uninstall
+```
+
+### Windows
+Install with a single command in PowerShell:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/reg1z/artifactr/main/install.ps1 | iex"
+```
+
+To skip all confirmation prompts, download `install.ps1` and run:
+
+```powershell
+.\install.ps1 -Yes
+```
+
+To uninstall, run:
+
+```powershell
+.\install.ps1 -Uninstall
+```
+
+### Manual Installation
 It's easiest to globally install `artifactr` via `pipx`, which auto-configures a separate python virtual environment (`venv`) for you:
 
 ```sh
@@ -83,7 +139,7 @@ pip install artifactr
 ```
 
 To use a non-system venv, find a good folder to put the new environment in, `cd` into it, and:
-- *(NOTE: You will have to `source` this venv whenever you want to use `artifactr`)
+- *(NOTE: You will have to `source` this venv whenever you want to use `artifactr`)*
 
 ```sh
 python -m venv .venv # <-- creates a venv in a new folder named ".venv"
@@ -185,7 +241,7 @@ art config import --link
 
 Opens artifacts in your default editor. Uses environment variables to determine your editor. Includes some common editors as fallbacks in case none are defined:
 
-`$VISUAL > $EDITOR > nano > neovim > vim > vi`
+`$VISUAL > $EDITOR > nano > neovim > vim > vi ( > edit > notepad.exe | Windows Only )`
 
 `art edit skill <name>` opens a skill's `SKILL.md` file. Support for managing all files/folders within a skill is a high priority on the roadmap.
 
@@ -297,46 +353,27 @@ art tool add cursor \
 # --vault your-vault <-- add vault-scoped tool support to `/your-vault/vault.yaml`
 ```
 
+## Vault Structure
+
+```
+vault/
+├── vault.yaml          # Optional: portable vault name and tool definitions
+├── skills/
+│   └── skill-name/
+│       ├── SKILL.md
+│       └── (supporting files...)
+├── agents/
+│   └── agent-name.md
+└── commands/
+    └── command-name.md
+```
+
+The optional `vault.yaml` file stores a portable vault name and vault-scoped tool definitions. When present, its name takes precedence over the name stored in the global config. Tool definitions in `vault.yaml` travel with the vault when shared.
+
+Artifacts are copied (or symlinked with `--link`) to tool-specific directories in the target repo (e.g., `.claude/skills/`, `.opencode/agents/`) and automatically excluded from git tracking.
+
 ---
 # Extended Usage
-
-### Installation
-
-Install artifactr with a single command on Linux or macOS:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/reg1z/artifactr/main/install.sh | bash
-```
-
-To skip all confirmation prompts (useful for scripts or dotfiles):
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/reg1z/artifactr/main/install.sh | bash -s -- --yes
-```
-
-To uninstall:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/reg1z/artifactr/main/install.sh | bash -s -- --uninstall
-```
-
-**Windows** — install with a single command in PowerShell:
-
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/reg1z/artifactr/main/install.ps1 | iex"
-```
-
-To skip all confirmation prompts:
-
-```powershell
-.\install.ps1 -Yes
-```
-
-To uninstall, download `install.ps1` and run:
-
-```powershell
-.\install.ps1 -Uninstall
-```
 
 ### Managing Vaults
 
@@ -746,7 +783,7 @@ art edit my-skill --interactive
 
 When a skill has multiple files, `art edit` shows a numbered file picker unless `-m` is passed. The picker supports creating new files (`n`), importing a file from your filesystem (`i`), and deleting files (`d`). The picker is skipped when stdin is not a TTY (piped input).
 
-The editor is resolved from `$VISUAL`, then `$EDITOR`, then the first available of `nano`, `nvim`, `vim`, `vi`.
+The editor is resolved from `$VISUAL`, then `$EDITOR`, then the first available of `nano`, `nvim`, `vim`, `vi`, (and `edit` or `notepad.exe` on Windows).
 
 Names can be resolved by YAML frontmatter `name:` field if no filename/dirname match is found — this applies to `art edit`, `art copy`, and all other artifact name-matching commands.
 
@@ -935,21 +972,3 @@ When the input path ends in `.zip`, artifactr auto-detects the archive type:
 - **Single artifact** (skill directory or `.md` file at zip root): stored directly, no selection modal.
 - **Vault bundle**: extracted and passed through the normal selection flow.
 
-## Vault Structure
-
-```
-vault/
-├── vault.yaml          # Optional: portable vault name and tool definitions
-├── skills/
-│   └── skill-name/
-│       ├── SKILL.md
-│       └── (supporting files...)
-├── agents/
-│   └── agent-name.md
-└── commands/
-    └── command-name.md
-```
-
-The optional `vault.yaml` file stores a portable vault name and vault-scoped tool definitions. When present, its name takes precedence over the name stored in the global config. Tool definitions in `vault.yaml` travel with the vault when shared.
-
-Artifacts are copied (or symlinked with `--link`) to tool-specific directories in the target repo (e.g., `.claude/skills/`, `.opencode/agents/`) and automatically excluded from git tracking.
