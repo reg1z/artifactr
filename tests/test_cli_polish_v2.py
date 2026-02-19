@@ -67,17 +67,17 @@ class TestCommandAliases:
     def test_edit_type_alias_s(self):
         parser = create_parser()
         ns = parser.parse_args(["edit", "s", "my-skill"])
-        assert ns.artifact_type == "s"
+        assert ns.artifact == ["s", "my-skill"]
 
     def test_edit_type_alias_c(self):
         parser = create_parser()
         ns = parser.parse_args(["edit", "c", "my-cmd"])
-        assert ns.artifact_type == "c"
+        assert ns.artifact == ["c", "my-cmd"]
 
     def test_edit_type_alias_a(self):
         parser = create_parser()
         ns = parser.parse_args(["edit", "a", "my-agent"])
-        assert ns.artifact_type == "a"
+        assert ns.artifact == ["a", "my-agent"]
 
 
 # ---------------------------------------------------------------------------

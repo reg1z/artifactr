@@ -295,6 +295,56 @@ def _find_by_frontmatter_name(
     return None
 
 
+def find_artifact_in_vault(
+    name: str,
+    vault_path: str,
+    artifact_type: str | None = None,
+) -> list[dict[str, Any]]:
+    """Find artifacts matching name (or frontmatter name) in a vault.
+
+    Args:
+        name: Artifact name to search for.
+        vault_path: Path to vault directory.
+        artifact_type: If set, only search that type. Otherwise search all types.
+
+    Returns:
+        List of match dicts: {"type": str, "path": Path, "dir": Path}
+        - For skills: "path" is SKILL.md, "dir" is the skill directory.
+        - For commands/agents: "path" is the .md file, "dir" is its parent.
+    """
+    types_to_search = [artifact_type] if artifact_type else ["skill", "command", "agent"]
+    matches: list[dict[str, Any]] = []
+    base = Path(vault_path)
+
+    for atype in types_to_search:
+        subdir = _TYPE_SUBDIRS.get(atype)
+        if subdir is None:
+            continue
+        type_dir = base / subdir
+        if not type_dir.is_dir():
+            continue
+
+        if atype in _DIRECTORY_TYPES:
+            candidate = type_dir / name / "SKILL.md"
+            if candidate.exists():
+                matches.append({"type": atype, "path": candidate, "dir": candidate.parent})
+            else:
+                # Frontmatter fallback
+                fm_match = _find_by_frontmatter_name(atype, name, base)
+                if fm_match is not None:
+                    matches.append({"type": atype, "path": fm_match, "dir": fm_match.parent})
+        else:
+            candidate = type_dir / f"{name}.md"
+            if candidate.exists():
+                matches.append({"type": atype, "path": candidate, "dir": candidate.parent})
+            else:
+                fm_match = _find_by_frontmatter_name(atype, name, base)
+                if fm_match is not None:
+                    matches.append({"type": atype, "path": fm_match, "dir": fm_match.parent})
+
+    return matches
+
+
 def resolve_edit_target(
     artifact_type: str,
     artifact_name: str,

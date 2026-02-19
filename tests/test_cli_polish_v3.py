@@ -377,13 +377,11 @@ class TestNewAliases:
 
     def test_edit_type_aliases(self):
         parser = create_parser()
-        for alias, expected in [
-            ("s", "skill"), ("sk", "skill"),
-            ("c", "command"), ("cmd", "command"), ("com", "command"),
-            ("a", "agent"), ("agt", "agent"), ("ag", "agent"),
+        for alias in [
+            "s", "sk", "c", "cmd", "com", "a", "agt", "ag",
         ]:
             args = parser.parse_args(["edit", alias, "test-name"])
-            assert args.artifact_type == alias  # argparse stores raw value
+            assert args.artifact == [alias, "test-name"]
 
     def test_create_subcommand_aliases(self):
         parser = create_parser()

@@ -162,15 +162,31 @@ class TestResolveEditTarget:
 class TestEditCLIParsing:
     """Tests for edit CLI argument parsing."""
 
-    def test_edit_arguments(self):
-        """Verify edit accepts required arguments."""
+    def test_edit_arguments_two_positional(self):
+        """Verify edit accepts the old two-positional form (type name)."""
         from artifactr.cli import create_parser
 
         parser = create_parser()
         args = parser.parse_args(["edit", "skill", "my-skill"])
         assert args.command == "edit"
-        assert args.artifact_type == "skill"
-        assert args.artifact_name == "my-skill"
+        assert args.artifact == ["skill", "my-skill"]
+
+    def test_edit_arguments_unified(self):
+        """Verify edit accepts the new unified specifier form."""
+        from artifactr.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["edit", "my-skill"])
+        assert args.command == "edit"
+        assert args.artifact == ["my-skill"]
+
+    def test_edit_specifier_with_type_prefix(self):
+        """Verify edit accepts [type/]name specifier."""
+        from artifactr.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["edit", "skill/my-skill"])
+        assert args.artifact == ["skill/my-skill"]
 
     def test_edit_here_flag(self):
         """Verify --here flag is parsed."""
@@ -188,13 +204,29 @@ class TestEditCLIParsing:
         args = parser.parse_args(["edit", "agent", "my-agent", "--vault", "favs"])
         assert args.vault == "favs"
 
-    def test_edit_invalid_type_rejected(self):
-        """Verify invalid artifact type is rejected."""
+    def test_edit_interactive_flag(self):
+        """Verify -i / --interactive flag is parsed."""
         from artifactr.cli import create_parser
 
         parser = create_parser()
-        with pytest.raises(SystemExit):
-            parser.parse_args(["edit", "invalid-type", "name"])
+        args = parser.parse_args(["edit", "my-skill", "-i"])
+        assert args.interactive is True
+
+    def test_edit_main_flag(self):
+        """Verify -m / --main flag is parsed."""
+        from artifactr.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["edit", "my-skill", "-m"])
+        assert args.main is True
+
+    def test_edit_new_file_flag(self):
+        """Verify -n / --new-file flag is parsed."""
+        from artifactr.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["edit", "my-skill", "-n", "refs/new.md"])
+        assert args.new_file == "refs/new.md"
 
 
 if __name__ == "__main__":

@@ -669,10 +669,15 @@ All artifact types require `--description` / `-d`. Skills are created as directo
 Open an artifact in your terminal editor:
 
 ```sh
-# Edit a skill in the default vault
-art edit skill my-skill
+# Edit by name (type auto-detected from default vault)
+art edit my-skill
 
-# Edit a command or agent
+# Edit with explicit type/name specifier
+art edit skill/my-skill
+art edit command/deploy-prod
+
+# Old two-positional form still works
+art edit skill my-skill
 art edit command deploy-prod
 art edit agent code-reviewer
 
@@ -681,11 +686,114 @@ art edit skill my-skill --vault=favorites
 
 # Edit a project-local artifact
 art edit skill my-skill --here
+
+# Open a specific file within a skill
+art edit skill/my-skill/refs/examples.md
+
+# Create and edit a new file within a skill
+art edit my-skill --new-file refs/examples.md
+
+# Open main SKILL.md directly, skipping the file picker
+art edit my-skill --main
+
+# Force interactive file picker (even if only SKILL.md exists)
+art edit my-skill --interactive
 ```
+
+When a skill has multiple files, `art edit` shows a numbered file picker unless `-m` is passed. The picker supports creating new files (`n`), importing a file from your filesystem (`i`), and deleting files (`d`). The picker is skipped when stdin is not a TTY (piped input).
 
 The editor is resolved from `$VISUAL`, then `$EDITOR`, then the first available of `nano`, `nvim`, `vim`, `vi`.
 
 Names can be resolved by YAML frontmatter `name:` field if no filename/dirname match is found — this applies to `art edit`, `art copy`, and all other artifact name-matching commands.
+
+### Listing Artifact Files
+
+View the files within a directory-based artifact (skill):
+
+```sh
+# List files in a skill from the default vault
+art ls my-skill
+
+# Disambiguate with type prefix
+art ls skill/my-skill
+
+# List from a specific vault
+art ls my-skill --vault=favorites
+```
+
+Output labels `SKILL.md` as the main file and lists all other files with their relative paths.
+
+### Reading Artifact Content
+
+Print the content of an artifact's primary file to stdout:
+
+```sh
+# Print SKILL.md for a skill
+art cat my-skill
+
+# Print a command or agent file
+art cat command/deploy-prod
+art cat agent/code-reviewer
+
+# Print a specific file within a skill
+art cat skill/my-skill/refs/examples.md
+
+# Read from a specific vault
+art cat my-skill --vault=favorites
+
+# Read a project-local artifact
+art cat my-skill --here
+```
+
+### Inspecting Artifacts
+
+Display the YAML frontmatter and file tree of an artifact:
+
+```sh
+# Inspect a skill
+art inspect my-skill
+
+# Inspect with type prefix
+art inspect command/deploy-prod
+
+# Inspect from a specific vault
+art inspect my-skill --vault=favorites
+```
+
+Example output for a skill:
+
+```
+Frontmatter:
+  name: my-skill
+  description: A helpful skill
+  version: 1.0
+
+Files:
+  SKILL.md (main)
+  refs/examples.md
+  refs/context.md
+```
+
+### Exporting Artifacts
+
+Package an artifact as a portable `.zip` archive:
+
+```sh
+# Export a skill (default: <cwd>/<name>.zip)
+art export my-skill
+
+# Export with explicit output path
+art export my-skill -o ~/backups/my-skill.zip
+
+# Export with type prefix
+art export skill/my-skill
+art export command/deploy-prod
+
+# Export from a specific vault
+art export my-skill --vault=favorites
+```
+
+Skill zips contain all files under `<artifact-name>/` at the archive root. Command and agent zips contain `<artifact-name>/<artifact-name>.md`. The exported zip can be re-imported with `art store ./my-skill.zip`.
 
 ### Copying Artifacts
 
@@ -771,9 +879,17 @@ art store ~/repos/my-project
 
 # Store into a specific vault
 art store ~/repos/my-project --vault=favorites
+
+# Import from a zip archive (single artifact or vault bundle)
+art store ./my-skill.zip
+art store ./bundle.zip --vault=favorites
 ```
 
 You'll be presented with a numbered list of discovered artifacts and can select which ones to store using individual numbers (`1`), ranges (`1-3`), comma-separated (`1,3,5`), combinations (`1,3-5`), or `all`.
+
+When the input path ends in `.zip`, artifactr auto-detects the archive type:
+- **Single artifact** (skill directory or `.md` file at zip root): stored directly, no selection modal.
+- **Vault bundle**: extracted and passed through the normal selection flow.
 
 ## Vault Structure
 

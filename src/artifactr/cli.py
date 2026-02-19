@@ -41,7 +41,7 @@ from .config import (
     save_global_tools,
     save_vault_metadata,
 )
-from .creator import create_artifact, create_skill, resolve_edit_target, resolve_project_target, resolve_vault_target
+from .creator import create_artifact, create_skill, find_artifact_in_vault, resolve_edit_target, resolve_project_target, resolve_vault_target
 from .importer import (
     copy_with_prompt,
     import_artifacts,
@@ -84,6 +84,32 @@ _NAV_TYPE_ALIASES: dict[str, str] = {
     "a": "agents",
     "agt": "agents",
 }
+
+
+# Type aliases for [type/]name[/sub/path] specifier parsing (shared across edit, ls, cat, inspect, export)
+_TYPE_ALIASES: dict[str, str] = {
+    "skill": "skill", "s": "skill", "sk": "skill",
+    "command": "command", "c": "command", "cmd": "command", "com": "command",
+    "agent": "agent", "a": "agent", "agt": "agent", "ag": "agent",
+}
+
+
+def _parse_artifact_specifier(specifier: str) -> tuple[str | None, str, str | None]:
+    """Parse a [type/]name[/sub/path] specifier.
+
+    Returns:
+        (artifact_type, name, subpath) where artifact_type and subpath may be None.
+    """
+    parts = specifier.split("/")
+    if parts[0] in _TYPE_ALIASES:
+        artifact_type: str | None = _TYPE_ALIASES[parts[0]]
+        name = parts[1] if len(parts) > 1 else ""
+        subpath = "/".join(parts[2:]) if len(parts) > 2 else None
+    else:
+        artifact_type = None
+        name = parts[0]
+        subpath = "/".join(parts[1:]) if len(parts) > 1 else None
+    return artifact_type, name, subpath or None
 
 
 def add_type_filter_args(parser: argparse.ArgumentParser, allow_names: bool = True) -> None:
@@ -248,11 +274,14 @@ def create_parser() -> ArtArgumentParser:
         ),
         epilog=(
             "Vault Operations:\n"
-            "  ls              List artifacts in a vault\n"
+            "  ls              List artifacts in a vault (or files within an artifact)\n"
             "  rm              Remove artifacts from a vault\n"
             "  copy     (cp)   Copy artifacts within or across vaults\n"
-            "  store    (st)   Store artifacts from a directory into a vault\n"
+            "  store    (st)   Store artifacts from a directory or zip into a vault\n"
             "  edit     (ed)   Edit an artifact in your editor\n"
+            "  cat             Print artifact primary file content to stdout\n"
+            "  inspect         Display artifact frontmatter and file tree\n"
+            "  export          Export an artifact as a zip archive\n"
             "  create   (cr)   Create new artifacts (skill, command, agent)\n"
             "\n"
             "Namespaces:\n"
@@ -570,9 +599,16 @@ def create_parser() -> ArtArgumentParser:
     list_parser = subparsers.add_parser(
         "ls", aliases=["list"], help="List artifacts in a vault",
         **make_help(
-            summary="List artifacts stored in a vault.",
+            summary=(
+                "List artifacts stored in a vault. "
+                "Optionally supply an artifact name (or [type/]name) to list files within that artifact."
+            ),
             aliases=["list"],
         ),
+    )
+    list_parser.add_argument(
+        "artifact_name", nargs="?", default=None,
+        help="Optional artifact name ([type/]name) to list files within a directory-based artifact",
     )
     list_parser.add_argument(
         "-V", "--vault", action="append", default=None, dest="vaults",
@@ -1085,16 +1121,21 @@ def create_parser() -> ArtArgumentParser:
         "edit", aliases=["ed"], help="Edit an artifact in your editor",
         show_help_on_error=True,
         **make_help(
-            summary="Open an artifact's file in your editor.",
+            summary=(
+                "Open an artifact's file in your editor. "
+                "Accepts [type/]name[/sub/path] or the legacy two-positional form (type name). "
+                "Type is auto-detected when omitted."
+            ),
             aliases=["ed"],
+            notes=(
+                "Use -i to force the file picker for skills; -m to always open SKILL.md directly; "
+                "-n <path> to create a new file within the skill."
+            ),
         ),
     )
     edit_parser.add_argument(
-        "artifact_type", choices=["skill", "s", "agent", "a", "agt", "ag", "command", "c", "cmd", "com", "sk"],
-        help="Type of artifact to edit (skill/s/sk, command/c/cmd/com, agent/a/agt/ag)",
-    )
-    edit_parser.add_argument(
-        "artifact_name", help="Name of the artifact to edit",
+        "artifact", nargs="+",
+        help="Artifact specifier: [type/]name[/sub/path], or legacy: type name",
     )
     edit_parser.add_argument(
         "-V", "--vault", help="Target vault (name or path)",
@@ -1106,6 +1147,88 @@ def create_parser() -> ArtArgumentParser:
     edit_parser.add_argument(
         "--tools",
         help="Comma-separated tool list (used with --here)",
+    )
+    edit_parser.add_argument(
+        "-i", "--interactive", action="store_true",
+        help="Force interactive file picker for directory-based artifacts (skills)",
+    )
+    edit_parser.add_argument(
+        "-m", "--main", action="store_true",
+        help="Open the primary file (SKILL.md) directly, bypassing the file picker",
+    )
+    edit_parser.add_argument(
+        "-n", "--new-file", dest="new_file", metavar="PATH",
+        help="Create a new file at relative PATH within the skill directory and open it",
+    )
+
+    # cat command
+    cat_parser = subparsers.add_parser(
+        "cat", help="Print artifact primary file content to stdout",
+        **make_help(
+            summary=(
+                "Print the raw content of an artifact's primary file to stdout. "
+                "Accepts [type/]name[/sub/path] specifier; sub-path supported for skills."
+            ),
+        ),
+    )
+    cat_parser.add_argument(
+        "artifact", help="Artifact specifier: [type/]name[/sub/path]",
+    )
+    cat_parser.add_argument(
+        "-V", "--vault", help="Target vault (name or path)",
+    )
+    cat_parser.add_argument(
+        "-H", "--here", action="store_true",
+        help="Resolve artifact from current project instead of vault",
+    )
+    cat_parser.add_argument(
+        "--tools", help="Comma-separated tool list (used with --here)",
+    )
+
+    # inspect command
+    inspect_parser = subparsers.add_parser(
+        "inspect", help="Display artifact frontmatter and file tree",
+        **make_help(
+            summary=(
+                "Display structured frontmatter metadata and (for skills) the file tree "
+                "of all files within the artifact directory."
+            ),
+        ),
+    )
+    inspect_parser.add_argument(
+        "artifact", help="Artifact specifier: [type/]name",
+    )
+    inspect_parser.add_argument(
+        "-V", "--vault", help="Target vault (name or path)",
+    )
+    inspect_parser.add_argument(
+        "-H", "--here", action="store_true",
+        help="Resolve artifact from current project instead of vault",
+    )
+    inspect_parser.add_argument(
+        "--tools", help="Comma-separated tool list (used with --here)",
+    )
+
+    # export command
+    export_parser = subparsers.add_parser(
+        "export", help="Export an artifact as a zip archive",
+        **make_help(
+            summary=(
+                "Package a single artifact as a portable .zip archive. "
+                "Skill directories are zipped with their full structure; "
+                "commands/agents are wrapped in a named directory."
+            ),
+        ),
+    )
+    export_parser.add_argument(
+        "artifact", help="Artifact specifier: [type/]name",
+    )
+    export_parser.add_argument(
+        "-V", "--vault", help="Target vault (name or path)",
+    )
+    export_parser.add_argument(
+        "-o", "--output", metavar="PATH",
+        help="Output zip file path (default: <cwd>/<artifact-name>.zip)",
     )
 
     # create command with subcommands
@@ -1267,8 +1390,78 @@ def _load_vault_tools_for_import(args: argparse.Namespace, vault_path_str: str |
     return global_tools, vault_tools
 
 
+def _list_skill_files(skill_dir: Path) -> list[Path]:
+    """List all files in a skill directory, SKILL.md first, then rest alphabetically."""
+    main_file = skill_dir / "SKILL.md"
+    all_files: list[Path] = []
+    if main_file.exists():
+        all_files.append(main_file)
+    for p in sorted(skill_dir.rglob("*")):
+        if p.is_file() and p != main_file:
+            all_files.append(p)
+    return all_files
+
+
+def _print_skill_file_listing(skill_dir: Path) -> None:
+    """Print all files in a skill directory, SKILL.md first with (main) label."""
+    files = _list_skill_files(skill_dir)
+    for f in files:
+        rel = f.relative_to(skill_dir)
+        if f.name == "SKILL.md" and f.parent == skill_dir:
+            print(f"  {rel}  (main)")
+        else:
+            print(f"  {rel}")
+
+
 def handle_list(args: argparse.Namespace) -> int:
     """Handle the art list command (vault-side listing)."""
+    artifact_name_arg = getattr(args, "artifact_name", None)
+
+    # If an artifact name is given, list files within that artifact
+    if artifact_name_arg is not None:
+        artifact_type, artifact_name, _subpath = _parse_artifact_specifier(artifact_name_arg)
+
+        # Resolve vault
+        vault_identifier = None
+        raw_vaults = getattr(args, "vaults", None)
+        if raw_vaults:
+            for v in raw_vaults:
+                for part in v.split(","):
+                    part = part.strip()
+                    if part:
+                        vault_identifier = part
+                        break
+                if vault_identifier:
+                    break
+
+        if vault_identifier:
+            vault_path_str = get_vault_by_name_or_path(vault_identifier)
+            if vault_path_str is None:
+                print(f"Error: Vault not found: {vault_identifier}", file=sys.stderr)
+                return 1
+        else:
+            vault_path_str = get_default_vault()
+            if vault_path_str is None:
+                print("Error: No default vault set. Use 'art vault add' or 'art vault init' to set up a vault.", file=sys.stderr)
+                return 1
+
+        matches = find_artifact_in_vault(artifact_name, vault_path_str, artifact_type)
+        if not matches:
+            print(f"Error: Artifact '{artifact_name}' not found in vault.", file=sys.stderr)
+            return 1
+
+        match = matches[0]
+        if match["type"] != "skill":
+            print(
+                f"Error: '{artifact_name}' is a file-based artifact ({match['type']}) and does not support file listing.",
+                file=sys.stderr,
+            )
+            return 1
+
+        skill_dir = match["dir"]
+        _print_skill_file_listing(skill_dir)
+        return 0
+
     has_vault_flag = getattr(args, "vaults", None) is not None
     vault_paths = _resolve_vault_paths(args)
     if not vault_paths:
@@ -3967,8 +4160,104 @@ def handle_spelunk(args: argparse.Namespace) -> int:
     return 0
 
 
+def _detect_zip_artifact_type(extracted_dir: Path) -> str:
+    """Inspect extracted zip directory contents to classify the artifact type.
+
+    Returns one of: "single-skill", "single-file-artifact", "vault-bundle".
+    Raises ValueError if no recognizable artifact structure is found.
+    """
+    root_entries = [e for e in extracted_dir.iterdir() if not e.name.startswith(".")]
+    root_dirs = [e for e in root_entries if e.is_dir()]
+    root_files = [e for e in root_entries if e.is_file()]
+
+    if not root_entries:
+        raise ValueError("Zip archive contains no recognizable artifact structure.")
+
+    # Multiple root directories → vault bundle
+    if len(root_dirs) > 1:
+        return "vault-bundle"
+
+    # Single root file (not directory) at root → not a recognized structure
+    if not root_dirs and root_files:
+        raise ValueError("Zip archive contains no recognizable artifact structure.")
+
+    single_dir = root_dirs[0]
+
+    # Check if the single dir itself contains skills/commands/agents → vault bundle
+    sub_entries = list(single_dir.iterdir())
+    sub_names = {e.name for e in sub_entries if e.is_dir()}
+    if sub_names & {"skills", "commands", "agents"}:
+        return "vault-bundle"
+
+    # Single directory with SKILL.md → single skill
+    if (single_dir / "SKILL.md").is_file():
+        return "single-skill"
+
+    # Single directory containing a .md file matching directory name → file-based artifact
+    md_files = [f for f in sub_entries if f.is_file() and f.suffix == ".md"]
+    if len(md_files) == 1 and md_files[0].stem == single_dir.name:
+        return "single-file-artifact"
+
+    raise ValueError("Zip archive contains no recognizable artifact structure.")
+
+
+def _store_artifacts_to_vault(
+    artifacts: list[dict],
+    vault_paths: list[Path],
+    force: bool,
+    source_label: str,
+) -> int:
+    """Run the interactive artifact selection and copy flow. Returns exit code."""
+    if not artifacts:
+        print(f"No artifacts found in {source_label}")
+        return 0
+
+    print(f"Discovered artifacts in {source_label}:")
+    for i, art in enumerate(artifacts, 1):
+        print(f"  {i}. {art['name']} ({art['type']}) - {art['path']}")
+
+    try:
+        selection = input(f"\nSelect artifacts to store [1-{len(artifacts)}, all]: ")
+    except EOFError:
+        return 0
+
+    indices = parse_selection(selection, len(artifacts))
+    if not indices:
+        return 0
+
+    vault_info = list_vaults()
+    for vault_path in vault_paths:
+        vault_display_name = vault_info["vault_names"].get(str(vault_path), vault_path.name)
+        stored_count = 0
+        for idx in indices:
+            art = artifacts[idx]
+            source_path = art["path"]
+            dest = vault_path / art["type_plural"] / source_path.name
+
+            if source_path.is_symlink():
+                try:
+                    resolved = source_path.resolve()
+                    if str(resolved).startswith(str(vault_path.resolve())):
+                        print(f"Skipping '{art['name']}': already linked to this vault")
+                        continue
+                except OSError:
+                    pass
+
+            result = copy_with_prompt(source_path, dest, force=force)
+            if result["copied"] > 0:
+                print(f"Stored: {art['name']} ({art['type']}) -> {dest}")
+                stored_count += 1
+
+        print(f"\n{stored_count} artifact(s) stored to vault: {vault_display_name}")
+
+    return 0
+
+
 def handle_store(args: argparse.Namespace) -> int:
     """Handle the store command."""
+    import tempfile
+    import zipfile
+
     global_store = getattr(args, "global_store", False)
     target_dir = getattr(args, "target_dir", None)
     tools_str = getattr(args, "tools", None)
@@ -3979,6 +4268,82 @@ def handle_store(args: argparse.Namespace) -> int:
     if not global_store and not target_dir:
         print("Error: Either a target directory or --global is required.", file=sys.stderr)
         return 1
+
+    # Zip input: error if combined with --global
+    if target_dir and target_dir.endswith(".zip"):
+        if global_store:
+            print("Error: A zip file target cannot be used with --global.", file=sys.stderr)
+            return 1
+
+        zip_path = Path(target_dir).resolve()
+        if not zip_path.exists():
+            print(f"Error: Zip file does not exist: {target_dir}", file=sys.stderr)
+            return 1
+        if not zipfile.is_zipfile(zip_path):
+            print(f"Error: File is not a valid zip archive: {target_dir}", file=sys.stderr)
+            return 1
+
+        vault_paths = _resolve_vault_paths(args)
+        if not vault_paths:
+            vault_path_str = get_default_vault()
+            if vault_path_str is None:
+                print("Error: No default vault set. Use 'art vault add' or 'art vault init' to set up a vault.", file=sys.stderr)
+                return 1
+            vault_paths = [Path(vault_path_str)]
+
+        force = getattr(args, "force", False)
+        tmp_dir = Path(tempfile.mkdtemp())
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(tmp_dir)
+
+            try:
+                zip_type = _detect_zip_artifact_type(tmp_dir)
+            except ValueError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                return 1
+
+            if zip_type in ("single-skill", "single-file-artifact"):
+                # The zip has a flat structure: <artifact-name>/ at root.
+                # Build source path and dest directly from the single root directory.
+                root_dirs = [e for e in tmp_dir.iterdir() if e.is_dir()]
+                if not root_dirs:
+                    print("Error: No recognizable artifacts found in zip.", file=sys.stderr)
+                    return 1
+                single_dir = root_dirs[0]
+                if zip_type == "single-skill":
+                    source_path = single_dir  # the skill directory
+                    type_plural = "skills"
+                    artifact_name = single_dir.name
+                else:
+                    # single-file-artifact: find the .md file in the single dir
+                    md_files = [f for f in single_dir.iterdir() if f.is_file() and f.suffix == ".md"]
+                    if not md_files:
+                        print("Error: No .md file found in zip artifact directory.", file=sys.stderr)
+                        return 1
+                    source_path = md_files[0]
+                    artifact_name = source_path.stem
+                    type_plural = "commands"  # default; could be agent but indistinguishable without frontmatter
+
+                vault_info = list_vaults()
+                for vault_path in vault_paths:
+                    vault_display_name = vault_info["vault_names"].get(str(vault_path), vault_path.name)
+                    dest = vault_path / type_plural / source_path.name
+                    result = copy_with_prompt(source_path, dest, force=force)
+                    stored_count = 1 if result["copied"] > 0 else 0
+                    if stored_count:
+                        print(f"Stored: {artifact_name} -> {dest}")
+                    print(f"\n{stored_count} artifact(s) stored to vault: {vault_display_name}")
+                return 0
+            else:
+                # vault-bundle: show selection modal
+                artifacts = discover_artifacts_by_structure(tmp_dir)
+                type_filters = resolve_type_filters(args)
+                if type_filters:
+                    artifacts = _apply_type_filters(artifacts, type_filters)
+                return _store_artifacts_to_vault(artifacts, vault_paths, force, str(zip_path))
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
     vault_paths = _resolve_vault_paths(args)
     if not vault_paths:
@@ -4012,52 +4377,165 @@ def handle_store(args: argparse.Namespace) -> int:
         artifacts = _apply_type_filters(artifacts, type_filters)
 
     source_label = "global config" if global_store else target_dir
-    if not artifacts:
-        print(f"No artifacts found in {source_label}")
-        return 0
-
     force = getattr(args, "force", False)
+    return _store_artifacts_to_vault(artifacts, vault_paths, force, source_label)
 
-    print(f"Discovered artifacts in {source_label}:")
-    for i, art in enumerate(artifacts, 1):
-        print(f"  {i}. {art['name']} ({art['type']}) - {art['path']}")
 
-    try:
-        selection = input(f"\nSelect artifacts to store [1-{len(artifacts)}, all]: ")
-    except EOFError:
-        return 0
+def _show_skill_picker(skill_dir: Path) -> Path | None:
+    """Display interactive file picker for a skill directory.
 
-    indices = parse_selection(selection, len(artifacts))
-    if not indices:
-        return 0
+    Returns the selected file path, or None if the user quits.
+    Handles new-file, import-file, and delete actions inline.
+    """
+    import subprocess
+    from .utils import get_editor
 
-    vault_info = list_vaults()
-    for vault_path in vault_paths:
-        vault_display_name = vault_info["vault_names"].get(str(vault_path), vault_path.name)
-        stored_count = 0
-        for idx in indices:
-            art = artifacts[idx]
-            source_path = art["path"]
-            dest = vault_path / art["type_plural"] / (source_path.name if art["type"] == "skill" else source_path.name)
+    while True:
+        files = _list_skill_files(skill_dir)
+        print(f"\nSkill: {skill_dir.name}")
+        for i, f in enumerate(files, 1):
+            rel = f.relative_to(skill_dir)
+            label = " (main)" if f.name == "SKILL.md" and f.parent == skill_dir else ""
+            print(f"  {i}. {rel}{label}")
+        print("\n  [n] New file  [i] Import file  [d] Delete file  [q] Quit")
 
-            # Skip if source is a symlink pointing to the target vault
-            if source_path.is_symlink():
+        try:
+            raw = input("\nSelect file or action [Enter = open SKILL.md]: ").strip()
+        except EOFError:
+            return None
+
+        if raw == "" or raw == "q":
+            if raw == "":
+                return skill_dir / "SKILL.md"
+            return None
+
+        if raw == "n":
+            try:
+                rel_path = input("New file path (relative): ").strip()
+            except EOFError:
+                continue
+            if not rel_path:
+                print("Error: Path cannot be empty.")
+                continue
+            new_file = skill_dir / rel_path
+            if new_file.exists():
+                print(f"Error: File already exists: {rel_path}")
+                continue
+            new_file.parent.mkdir(parents=True, exist_ok=True)
+            new_file.touch()
+            return new_file
+
+        if raw == "i":
+            try:
+                src_raw = input("Source file path: ").strip()
+            except EOFError:
+                continue
+            src = Path(src_raw).expanduser()
+            if not src.exists():
+                print(f"Error: Source file not found: {src_raw}")
+                continue
+            try:
+                dest_raw = input(f"Destination path within skill [default: {src.name}]: ").strip()
+            except EOFError:
+                continue
+            dest_rel = dest_raw if dest_raw else src.name
+            dest = skill_dir / dest_rel
+            if dest.exists():
                 try:
-                    resolved = source_path.resolve()
-                    if str(resolved).startswith(str(vault_path.resolve())):
-                        print(f"Skipping '{art['name']}': already linked to this vault")
-                        continue
-                except OSError:
-                    pass
+                    confirm = input(f"File already exists at {dest_rel}. Overwrite? [y/N]: ").strip().lower()
+                except EOFError:
+                    continue
+                if confirm not in ("y", "yes"):
+                    print("Aborted.")
+                    continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest)
+            return dest
 
-            result = copy_with_prompt(source_path, dest, force=force)
-            if result["copied"] > 0:
-                print(f"Stored: {art['name']} ({art['type']}) -> {dest}")
-                stored_count += 1
+        if raw == "d":
+            del_files = _list_skill_files(skill_dir)
+            for i, f in enumerate(del_files, 1):
+                rel = f.relative_to(skill_dir)
+                print(f"  {i}. {rel}")
+            try:
+                sel_raw = input("Select file to delete [number]: ").strip()
+            except EOFError:
+                continue
+            try:
+                sel_idx = int(sel_raw) - 1
+            except ValueError:
+                print("Invalid selection.")
+                continue
+            if sel_idx < 0 or sel_idx >= len(del_files):
+                print("Invalid selection.")
+                continue
+            to_delete = del_files[sel_idx]
+            if to_delete.name == "SKILL.md" and to_delete.parent == skill_dir:
+                print("Error: Cannot delete the primary file (SKILL.md).")
+                continue
+            rel_del = to_delete.relative_to(skill_dir)
+            try:
+                confirm = input(f"Delete {rel_del}? [y/N]: ").strip().lower()
+            except EOFError:
+                continue
+            if confirm not in ("y", "yes"):
+                print("Aborted.")
+                continue
+            to_delete.unlink()
+            # Remove empty parent dirs (except skill root)
+            parent = to_delete.parent
+            while parent != skill_dir:
+                if not any(parent.iterdir()):
+                    parent.rmdir()
+                    parent = parent.parent
+                else:
+                    break
+            print(f"Deleted: {rel_del}")
+            continue
 
-        print(f"\n{stored_count} artifact(s) stored to vault: {vault_display_name}")
+        # Numeric selection
+        try:
+            idx = int(raw) - 1
+        except ValueError:
+            print(f"Invalid input: {raw!r}. Enter a file number, or n/i/d/q.")
+            continue
+        if idx < 0 or idx >= len(files):
+            print(f"Invalid selection: must be 1–{len(files)}.")
+            continue
+        return files[idx]
 
-    return 0
+
+def _resolve_edit_artifact(
+    specifier_parts: list[str],
+    vault: str | None,
+    here: bool,
+    tools_list: list[str] | None,
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """Parse specifier parts → (artifact_type, artifact_name, subpath, error).
+
+    Handles both old two-positional form and new unified specifier.
+    Returns (artifact_type, artifact_name, subpath, error_message).
+    """
+    if len(specifier_parts) == 2 and specifier_parts[0] in _TYPE_ALIASES:
+        # Old two-positional form: art edit skill my-skill
+        artifact_type = _TYPE_ALIASES[specifier_parts[0]]
+        artifact_name = specifier_parts[1]
+        subpath = None
+    elif len(specifier_parts) == 1:
+        # New unified form: art edit [type/]name[/sub/path]
+        artifact_type, artifact_name, subpath = _parse_artifact_specifier(specifier_parts[0])
+    elif len(specifier_parts) == 2 and specifier_parts[0] not in _TYPE_ALIASES:
+        # Two args but first is not a type → error
+        return None, None, None, (
+            f"Invalid artifact specifier: {' '.join(specifier_parts)!r}. "
+            "Use: art edit [type/]name or art edit <type> <name>"
+        )
+    else:
+        return None, None, None, (
+            f"Too many positional arguments. Use: art edit [type/]name or art edit <type> <name>"
+        )
+
+    return artifact_type, artifact_name, subpath, None
 
 
 def handle_edit(args: argparse.Namespace) -> int:
@@ -4066,16 +4544,112 @@ def handle_edit(args: argparse.Namespace) -> int:
 
     from .utils import get_editor
 
-    type_aliases = {"s": "skill", "sk": "skill", "c": "command", "cmd": "command", "com": "command", "a": "agent", "agt": "agent", "ag": "agent"}
-    artifact_type = type_aliases.get(args.artifact_type, args.artifact_type)
-    artifact_name = args.artifact_name
     vault = getattr(args, "vault", None)
     here = getattr(args, "here", False)
     tools_str = getattr(args, "tools", None)
+    force_interactive = getattr(args, "interactive", False)
+    force_main = getattr(args, "main", False)
+    new_file_path = getattr(args, "new_file", None)
 
     tools_list = None
     if tools_str:
         tools_list = [t.strip() for t in tools_str.split(",")]
+
+    specifier_parts: list[str] = args.artifact
+    artifact_type, artifact_name, subpath, parse_error = _resolve_edit_artifact(
+        specifier_parts, vault, here, tools_list
+    )
+    if parse_error:
+        print(f"Error: {parse_error}", file=sys.stderr)
+        return 1
+
+    # Auto-detect artifact type if not specified
+    if artifact_type is None:
+        if here:
+            # For --here mode, auto-detect using project dirs
+            from .utils import get_editor as _ge  # noqa: F401 (just ensure import)
+            # Fall back to resolve_edit_target with each type
+            resolution = None
+            found_types: list[str] = []
+            for atype in ("skill", "command", "agent"):
+                r = resolve_edit_target(atype, artifact_name, vault=None, here=True, tools=tools_list)
+                if r["success"]:
+                    found_types.append(atype)
+            if len(found_types) == 0:
+                print(f"Error: Artifact '{artifact_name}' not found in project", file=sys.stderr)
+                return 1
+            if len(found_types) > 1:
+                print(
+                    f"Error: Ambiguous artifact name '{artifact_name}': found as {', '.join(found_types)}. "
+                    f"Use a type prefix (e.g. skill/{artifact_name}).",
+                    file=sys.stderr,
+                )
+                return 1
+            artifact_type = found_types[0]
+        else:
+            vault_path_str = get_vault_by_name_or_path(vault) if vault else get_default_vault()
+            if vault_path_str is None:
+                print("Error: No default vault set. Use 'art vault add' or 'art vault init' to set up a vault.", file=sys.stderr)
+                return 1
+            matches = find_artifact_in_vault(artifact_name, vault_path_str)
+            if len(matches) == 0:
+                print(f"Error: Artifact '{artifact_name}' not found in vault", file=sys.stderr)
+                return 1
+            if len(matches) > 1:
+                types_found = [m["type"] for m in matches]
+                print(
+                    f"Error: Ambiguous artifact name '{artifact_name}': found as {', '.join(types_found)}. "
+                    f"Use a type prefix (e.g. skill/{artifact_name}).",
+                    file=sys.stderr,
+                )
+                return 1
+            # Use the match path directly — avoids a second vault-lookup
+            match = matches[0]
+            artifact_type = match["type"]
+            resolved_path = match["path"]
+            # Jump directly to editor logic, bypassing the resolve_edit_target call below
+            editor = get_editor()
+            if editor is None:
+                print(
+                    "Error: No editor found. Set $EDITOR or install nano, neovim, vim, or vi.",
+                    file=sys.stderr,
+                )
+                return 1
+            is_skill = artifact_type == "skill"
+            # (new_file / subpath handled below after the resolve block)
+            if new_file_path is not None:
+                if not is_skill:
+                    print(f"Error: --new-file is not supported for file-based artifact types ({artifact_type}).", file=sys.stderr)
+                    return 1
+                skill_dir = resolved_path.parent
+                new_full = skill_dir / new_file_path
+                if new_full.exists():
+                    print(f"Error: File already exists: {new_file_path}", file=sys.stderr)
+                    return 1
+                new_full.parent.mkdir(parents=True, exist_ok=True)
+                new_full.touch()
+                return subprocess.run([editor, str(new_full)]).returncode
+            if subpath is not None:
+                if not is_skill:
+                    print(f"Error: Sub-paths are not supported for file-based artifact types ({artifact_type}).", file=sys.stderr)
+                    return 1
+                skill_dir = resolved_path.parent
+                sub_full = skill_dir / subpath
+                if not sub_full.exists():
+                    print(f"Error: File not found in skill: {subpath}", file=sys.stderr)
+                    return 1
+                return subprocess.run([editor, str(sub_full)]).returncode
+            if is_skill:
+                skill_dir = resolved_path.parent
+                if force_main or not sys.stdin.isatty():
+                    return subprocess.run([editor, str(resolved_path)]).returncode
+                skill_files = _list_skill_files(skill_dir)
+                if force_interactive or len(skill_files) > 1:
+                    chosen = _show_skill_picker(skill_dir)
+                    if chosen is None:
+                        return 0
+                    return subprocess.run([editor, str(chosen)]).returncode
+            return subprocess.run([editor, str(resolved_path)]).returncode
 
     resolution = resolve_edit_target(
         artifact_type=artifact_type,
@@ -4089,6 +4663,8 @@ def handle_edit(args: argparse.Namespace) -> int:
         print(f"Error: {resolution['error']}", file=sys.stderr)
         return 1
 
+    resolved_path: Path = resolution["path"]
+
     editor = get_editor()
     if editor is None:
         print(
@@ -4097,8 +4673,284 @@ def handle_edit(args: argparse.Namespace) -> int:
         )
         return 1
 
-    result = subprocess.run([editor, str(resolution["path"])])
+    # For skills (directory-based), resolved_path is SKILL.md; parent is the skill dir
+    is_skill = artifact_type == "skill"
+
+    # Handle --new-file flag
+    if new_file_path is not None:
+        if not is_skill:
+            print(
+                f"Error: --new-file is not supported for file-based artifact types ({artifact_type}).",
+                file=sys.stderr,
+            )
+            return 1
+        skill_dir = resolved_path.parent
+        new_full = skill_dir / new_file_path
+        if new_full.exists():
+            print(f"Error: File already exists: {new_file_path}", file=sys.stderr)
+            return 1
+        new_full.parent.mkdir(parents=True, exist_ok=True)
+        new_full.touch()
+        result = subprocess.run([editor, str(new_full)])
+        return result.returncode
+
+    # Handle sub-path
+    if subpath is not None:
+        if not is_skill:
+            print(
+                f"Error: Sub-paths are not supported for file-based artifact types ({artifact_type}).",
+                file=sys.stderr,
+            )
+            return 1
+        skill_dir = resolved_path.parent
+        sub_full = skill_dir / subpath
+        if not sub_full.exists():
+            print(f"Error: File not found in skill: {subpath}", file=sys.stderr)
+            return 1
+        result = subprocess.run([editor, str(sub_full)])
+        return result.returncode
+
+    # Skills: interactive picker logic
+    if is_skill:
+        skill_dir = resolved_path.parent
+        # -m: always open SKILL.md directly
+        if force_main:
+            result = subprocess.run([editor, str(resolved_path)])
+            return result.returncode
+        # Non-TTY: skip picker
+        if not sys.stdin.isatty():
+            result = subprocess.run([editor, str(resolved_path)])
+            return result.returncode
+        # -i: always show picker; otherwise only if skill has files beyond SKILL.md
+        skill_files = _list_skill_files(skill_dir)
+        has_extra_files = len(skill_files) > 1
+        if force_interactive or has_extra_files:
+            chosen = _show_skill_picker(skill_dir)
+            if chosen is None:
+                return 0
+            result = subprocess.run([editor, str(chosen)])
+            return result.returncode
+
+    result = subprocess.run([editor, str(resolved_path)])
     return result.returncode
+
+
+def _resolve_artifact_for_read(
+    specifier: str,
+    vault: str | None,
+    here: bool,
+    tools_str: str | None,
+) -> tuple[dict | None, str | None, str | None]:
+    """Resolve an artifact for read-only commands (cat, inspect, export).
+
+    Returns (resolution_dict, artifact_type, subpath) or (None, None, error_msg) on failure.
+    resolution_dict keys: success, path (the primary file).
+    """
+    tools_list = [t.strip() for t in tools_str.split(",")] if tools_str else None
+    artifact_type, artifact_name, subpath = _parse_artifact_specifier(specifier)
+
+    if artifact_type is None:
+        # Auto-detect
+        if here:
+            found_types: list[str] = []
+            for atype in ("skill", "command", "agent"):
+                r = resolve_edit_target(atype, artifact_name, vault=None, here=True, tools=tools_list)
+                if r["success"]:
+                    found_types.append(atype)
+            if not found_types:
+                return None, None, f"Artifact '{artifact_name}' not found in project"
+            if len(found_types) > 1:
+                return None, None, (
+                    f"Ambiguous artifact name '{artifact_name}': found as {', '.join(found_types)}. "
+                    f"Use a type prefix (e.g. skill/{artifact_name})."
+                )
+            artifact_type = found_types[0]
+        else:
+            vault_path_str = get_vault_by_name_or_path(vault) if vault else get_default_vault()
+            if vault_path_str is None:
+                return None, None, "No default vault set. Use 'art vault add' or 'art vault init' to set up a vault."
+            matches = find_artifact_in_vault(artifact_name, vault_path_str)
+            if not matches:
+                return None, None, f"Artifact '{artifact_name}' not found in vault"
+            if len(matches) > 1:
+                types_found = [m["type"] for m in matches]
+                return None, None, (
+                    f"Ambiguous artifact name '{artifact_name}': found as {', '.join(types_found)}. "
+                    f"Use a type prefix (e.g. skill/{artifact_name})."
+                )
+            # Use the match path directly — avoids a second vault-lookup in resolve_edit_target
+            match = matches[0]
+            return {"success": True, "path": match["path"]}, match["type"], subpath
+
+    resolution = resolve_edit_target(
+        artifact_type=artifact_type,
+        artifact_name=artifact_name,
+        vault=vault,
+        here=here,
+        tools=tools_list,
+    )
+    if not resolution["success"]:
+        return None, None, resolution["error"]
+
+    return resolution, artifact_type, subpath
+
+
+def handle_cat(args: argparse.Namespace) -> int:
+    """Handle the cat command — print artifact primary file content to stdout."""
+    vault = getattr(args, "vault", None)
+    here = getattr(args, "here", False)
+    tools_str = getattr(args, "tools", None)
+
+    resolution, artifact_type, subpath = _resolve_artifact_for_read(
+        args.artifact, vault, here, tools_str
+    )
+    if resolution is None:
+        print(f"Error: {artifact_type}", file=sys.stderr)  # artifact_type holds error msg here
+        return 1
+
+    resolved_path: Path = resolution["path"]
+    is_skill = artifact_type == "skill"
+
+    if subpath is not None:
+        if not is_skill:
+            print(
+                f"Error: Sub-paths are not supported for file-based artifact types ({artifact_type}).",
+                file=sys.stderr,
+            )
+            return 1
+        skill_dir = resolved_path.parent
+        sub_full = skill_dir / subpath
+        if not sub_full.exists():
+            print(f"Error: File not found in skill: {subpath}", file=sys.stderr)
+            return 1
+        print(sub_full.read_text(encoding="utf-8"), end="")
+        return 0
+
+    print(resolved_path.read_text(encoding="utf-8"), end="")
+    return 0
+
+
+def _parse_frontmatter(file_path: Path) -> dict:
+    """Parse YAML frontmatter from a file. Returns empty dict if none found."""
+    import yaml as _yaml
+
+    try:
+        text = file_path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+
+    if not text.startswith("---"):
+        return {}
+
+    lines = text.splitlines()
+    end_idx = None
+    for i, line in enumerate(lines[1:], 1):
+        if line.strip() == "---":
+            end_idx = i
+            break
+
+    if end_idx is None:
+        return {}
+
+    fm_text = "\n".join(lines[1:end_idx])
+    try:
+        data = _yaml.safe_load(fm_text)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def handle_inspect(args: argparse.Namespace) -> int:
+    """Handle the inspect command — display frontmatter and file tree."""
+    vault = getattr(args, "vault", None)
+    here = getattr(args, "here", False)
+    tools_str = getattr(args, "tools", None)
+
+    resolution, artifact_type, _subpath = _resolve_artifact_for_read(
+        args.artifact, vault, here, tools_str
+    )
+    if resolution is None:
+        print(f"Error: {artifact_type}", file=sys.stderr)
+        return 1
+
+    resolved_path: Path = resolution["path"]
+    is_skill = artifact_type == "skill"
+
+    # Parse frontmatter
+    fm = _parse_frontmatter(resolved_path)
+    print("Frontmatter:")
+    if fm:
+        for key, value in fm.items():
+            if isinstance(value, (list, dict)):
+                import yaml as _yaml
+                rendered = _yaml.dump(value, default_flow_style=False).rstrip("\n")
+                print(f"  {key}:")
+                for line in rendered.splitlines():
+                    print(f"    {line}")
+            else:
+                print(f"  {key}: {value}")
+    else:
+        print("  (no frontmatter found)")
+
+    # File tree for directory-based artifacts
+    if is_skill:
+        skill_dir = resolved_path.parent
+        print("\nFiles:")
+        _print_skill_file_listing(skill_dir)
+
+    return 0
+
+
+def handle_export(args: argparse.Namespace) -> int:
+    """Handle the export command — package artifact as a zip archive."""
+    import zipfile
+
+    vault = getattr(args, "vault", None)
+    output_path_str = getattr(args, "output", None)
+
+    resolution, artifact_type, _subpath = _resolve_artifact_for_read(
+        args.artifact, vault, False, None
+    )
+    if resolution is None:
+        print(f"Error: {artifact_type}", file=sys.stderr)
+        return 1
+
+    resolved_path: Path = resolution["path"]
+    is_skill = artifact_type == "skill"
+
+    # Determine artifact filesystem name (folder or file stem)
+    if is_skill:
+        artifact_dir = resolved_path.parent
+        artifact_fs_name = artifact_dir.name
+    else:
+        artifact_fs_name = resolved_path.stem
+
+    # Determine output zip path
+    if output_path_str:
+        zip_path = Path(output_path_str).expanduser().resolve()
+    else:
+        zip_path = Path.cwd() / f"{artifact_fs_name}.zip"
+
+    if zip_path.exists():
+        print(f"Error: Output path already exists: {zip_path}", file=sys.stderr)
+        return 1
+
+    if not zip_path.parent.exists():
+        print(f"Error: Output directory does not exist: {zip_path.parent}", file=sys.stderr)
+        return 1
+
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        if is_skill:
+            for f in artifact_dir.rglob("*"):
+                if f.is_file():
+                    arcname = f"{artifact_fs_name}/{f.relative_to(artifact_dir)}"
+                    zf.write(f, arcname)
+        else:
+            arcname = f"{artifact_fs_name}/{artifact_fs_name}.md"
+            zf.write(resolved_path, arcname)
+
+    print(f"Exported: {artifact_fs_name} -> {zip_path}")
+    return 0
 
 
 def handle_create_artifact(args: argparse.Namespace, artifact_type: str) -> int:
@@ -4310,6 +5162,15 @@ def _main() -> int:
 
     if args.command in ("edit", "ed"):
         return handle_edit(args)
+
+    if args.command == "cat":
+        return handle_cat(args)
+
+    if args.command == "inspect":
+        return handle_inspect(args)
+
+    if args.command == "export":
+        return handle_export(args)
 
     if args.command in ("create", "cr"):
         if args.create_command is None:
