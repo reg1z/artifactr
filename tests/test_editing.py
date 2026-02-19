@@ -1,6 +1,7 @@
 """Tests for artifact editing (get_editor and resolve_edit_target)."""
 
 import os
+import platform
 from pathlib import Path
 from unittest import mock
 
@@ -59,9 +60,30 @@ class TestGetEditor:
             os.environ.pop("EDITOR", None)
             assert get_editor() == "vim"
 
+    @mock.patch("artifactr.utils.platform.system", return_value="Linux")
     @mock.patch("artifactr.utils.shutil.which")
-    def test_no_editor_found(self, mock_which):
-        """Verify None is returned when no editor is available."""
+    def test_no_editor_found(self, mock_which, mock_platform):
+        """Verify None is returned when no editor is available on non-Windows."""
+        mock_which.return_value = None
+        with mock.patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("VISUAL", None)
+            os.environ.pop("EDITOR", None)
+            assert get_editor() is None
+
+    @mock.patch("artifactr.utils.platform.system", return_value="Windows")
+    @mock.patch("artifactr.utils.shutil.which")
+    def test_fallback_notepad_windows(self, mock_which, mock_platform):
+        """Verify notepad.exe is used as last fallback on Windows."""
+        mock_which.side_effect = lambda cmd: "C:\\Windows\\notepad.exe" if cmd == "notepad.exe" else None
+        with mock.patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("VISUAL", None)
+            os.environ.pop("EDITOR", None)
+            assert get_editor() == "notepad.exe"
+
+    @mock.patch("artifactr.utils.platform.system", return_value="Windows")
+    @mock.patch("artifactr.utils.shutil.which")
+    def test_no_editor_found_windows(self, mock_which, mock_platform):
+        """Verify None is returned when notepad.exe is also not found on Windows."""
         mock_which.return_value = None
         with mock.patch.dict(os.environ, {}, clear=True):
             os.environ.pop("VISUAL", None)

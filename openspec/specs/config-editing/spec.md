@@ -5,7 +5,7 @@
 
 #### Scenario: Open config in editor
 - **WHEN** `art config edit` is run
-- **THEN** the global config file at `<config_dir>/config.yaml` MUST be opened in the user's preferred editor using the same resolution as `art edit` (`$VISUAL` → `$EDITOR` → nano/nvim/vim/vi)
+- **THEN** the global config file at `<config_dir>/config.yaml` MUST be opened in the user's preferred editor using the same resolution as `art edit` (`$VISUAL` → `$EDITOR` → nano/nvim/vim/vi → notepad.exe on Windows)
 
 #### Scenario: No editor found
 - **WHEN** `art config edit` is run and no editor can be resolved
