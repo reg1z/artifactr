@@ -1,6 +1,12 @@
 # Artifactr
 
-A cross-platform CLI tool for managing AI project artifacts. Maintain a personal library of skills, agents, and commands in centralized "vaults" and import them into any git repository for use with AI coding assistants.
+A cross-platform CLI tool for managing AI project artifacts. Maintain a personal library of skills, agents, and commands in centralized "vaults" and import them into any project or tool configuration for use with AI coding assistants.
+
+### Philosophy
+- Local-first. No network functionality at all.
+- Extensible. Easily add support for your coding agent with a simple yaml configuration.
+- Portable. Cross-platform support (Linux/Mac/Win).
+- Easy to install, easy to export your artifacts/configuration.
 
 [Installation](#installation) •
 [Quickstart](#quickstart) •
@@ -293,6 +299,28 @@ art tool add cursor \
 
 ---
 # Extended Usage
+
+### Installation
+
+Install artifactr with a single command on Linux or macOS:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/reg1z/artifactr/main/install.sh | bash
+```
+
+To skip all confirmation prompts (useful for scripts or dotfiles):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/reg1z/artifactr/main/install.sh | bash -s -- --yes
+```
+
+To uninstall:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/reg1z/artifactr/main/install.sh | bash -s -- --uninstall
+```
+
+> **Windows:** Native PowerShell support (`install.ps1`) is planned. In the meantime, install with `pip install artifactr` or `pipx install artifactr`.
 
 ### Managing Vaults
 
