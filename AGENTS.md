@@ -99,7 +99,7 @@ Supports both legacy (no headers) and v2 format via `_parse_cache_file()`.
 - **CLI aliases**: `-V`/`--vault` accepts comma-separated or repeated flags; extensive short aliases (`s`/`sk` skill, `c`/`cmd` command, `a`/`agt` agent; `cr` create, `ed` edit, `sp` spelunk, `st` store, `v` vault, `p`/`proj` project)
 - **Alias maintenance**: When adding, changing, or removing command aliases, both the argparse `aliases=` and the `make_help(aliases=...)` call must be updated. The `--help` output is the user-facing source of truth for discoverability.
 - **Windows symlink fallback**: `create_link()` falls back to hard links when symlinks fail (requires both files on same volume)
-- **Frontmatter search**: Edit-by-name falls back to scanning `.md` files for `name:` YAML frontmatter if direct path lookup fails
+- **Frontmatter name resolution**: All artifact name-matching commands MUST resolve names in this order: (1) exact filename/dirname match, (2) frontmatter `name:` field fallback. This convention applies project-wide — not just `art edit`. `_find_by_frontmatter_name()` and `_parse_frontmatter_name()` in `creator.py` are the canonical implementations.
 - **Spec-driven dev**: Features are developed against specs in `openspec/changes/`. openspec tools are used in this repo.
 - When updating README.md, edit only lines under the "Extended Usage" heading. No content above it should be touched.
 

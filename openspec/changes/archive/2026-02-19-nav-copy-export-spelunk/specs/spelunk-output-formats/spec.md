@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Spelunk output formatting layer
 A formatting layer MUST exist that serializes spelunk discovery results into the requested output format.
@@ -24,6 +24,8 @@ A formatting layer MUST exist that serializes spelunk discovery results into the
 #### Scenario: Empty results
 - **WHEN** no artifacts are discovered and structured output is requested
 - **THEN** JSON MUST output an empty array `[]`, YAML MUST output an empty list, and markdown MUST output a table header with no rows
+
+## ADDED Requirements
 
 ### Requirement: Spelunk LOCATION column
 The human-format spelunk output MUST include a LOCATION column showing the artifact's path relative to the original search root.

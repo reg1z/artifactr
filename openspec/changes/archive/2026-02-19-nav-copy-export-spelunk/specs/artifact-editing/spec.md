@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Frontmatter name fallback resolution
 When an artifact name provided to any artifact name-matching command does not match a folder or file name in the target search scope, the system MUST fall back to searching YAML frontmatter `name` fields.

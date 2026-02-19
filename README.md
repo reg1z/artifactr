@@ -326,9 +326,90 @@ art vault select favorites
 
 # Remove a vault (by name or path)
 art vault rm favorites
+
+# Copy a vault (copies skills/, commands/, agents/, vault.yaml only)
+art vault copy my-vault new-vault-name
+
+# Copy a vault to an explicit path
+art vault copy my-vault /path/to/new-vault
+
+# Copy everything except .git/
+art vault copy my-vault new-vault-name --all
+
+# Alias: vault cp
+art vault cp my-vault new-vault-name
 ```
 
 Vaults added without `--name` are automatically assigned names using the `llm-vault-N` pattern. Vault names can be used in place of full directory paths in any command that accepts a vault identifier, including `--vault` on `art import`.
+
+### Vault Export & Import
+
+Bundle vaults into portable `.zip` archives to share or back up your artifact library:
+
+```sh
+# Export a vault to a zip archive
+art vault export my-vault /path/to/bundle.zip
+
+# Export multiple vaults (comma-separated)
+art vault export vault-1,vault-2 /path/to/bundle.zip
+
+# Export all registered vaults
+art vault export --all /path/to/bundle.zip
+
+# Export vaults matching a glob pattern
+art vault export "claude-*" /path/to/bundle.zip
+
+# Import from a zip archive (lists vaults and prompts for confirmation)
+art vault import bundle.zip
+
+# Import with auto-confirmation
+art vault import bundle.zip --yes
+
+# Import to a specific destination directory
+art vault import bundle.zip /path/to/dest/
+```
+
+Archives include a `manifest.yaml` at the root. On import, vaults are extracted as subdirectories of the destination and automatically registered in your config.
+
+### Shell Navigation
+
+`art nav` lets you jump to vault directories from your shell. The `art shell setup` command installs a shell wrapper that makes navigation work like `cd`:
+
+```sh
+# Install the shell wrapper into your rc file (bash/zsh/fish/etc.)
+art shell setup
+
+# Skip confirmation prompts
+art shell setup --yes
+```
+
+After sourcing your rc file, `art nav` changes your working directory directly:
+
+```sh
+# Navigate to the default vault root
+art nav
+
+# Navigate to a type subdirectory in the default vault
+art nav skills
+art nav commands
+art nav agents
+
+# Navigate to a specific vault
+art nav my-vault
+
+# Navigate to a type subdirectory within a named vault
+art nav my-vault/skills
+```
+
+Output mode flags (useful before installing the wrapper, or for scripting):
+
+```sh
+art nav skills --print   # print resolved path to stdout
+art nav skills --spawn   # open a subshell in the target directory
+art nav skills --window  # open a new terminal window at the target
+```
+
+Set `nav_mode: wrapper` (or `spawn`/`window`/`print`) in your config to make a mode the default when no flag is passed.
 
 ### Managing Tools
 
@@ -604,6 +685,43 @@ art edit skill my-skill --here
 
 The editor is resolved from `$VISUAL`, then `$EDITOR`, then the first available of `nano`, `nvim`, `vim`, `vi`.
 
+Names can be resolved by YAML frontmatter `name:` field if no filename/dirname match is found — this applies to `art edit`, `art copy`, and all other artifact name-matching commands.
+
+### Copying Artifacts
+
+Copy artifacts within a vault or across vaults with `art copy` (alias: `art cp`):
+
+```sh
+# Copy an artifact to another vault (trailing slash = destination vault)
+art copy my-skill vault-2/
+
+# Disambiguate by type
+art copy skill/my-skill vault-2/
+
+# Source from a specific vault
+art copy vault-1/my-skill vault-2/
+
+# Fully-qualified source (vault/type/name)
+art copy vault-1/skill/my-skill vault-2/
+
+# Duplicate within the same vault (new name, not a registered vault)
+art copy my-skill my-skill-v2
+
+# Copy to another vault with an explicit destination name
+art copy my-skill vault-2/my-skill-renamed
+
+# Copy all artifacts to another vault
+art copy '*' vault-2/
+
+# Copy all skills to another vault
+art copy 'skills/*' vault-2/
+
+# Copy agents matching a pattern
+art copy 'agents/*-runner' vault-6/
+```
+
+The artifact type travels with the copy — a skill always lands in `skills/`, a command in `commands/`, etc. Frontmatter `name:` fields are used as a fallback when no filename match exists.
+
 ### Discovering Artifacts
 
 Scan directories, vaults, or global configs for existing artifacts:
@@ -621,19 +739,27 @@ art spelunk -g
 # Filter by tool or type
 art spelunk ~/repos/my-project --tools=claude-code
 art spelunk -S
+
+# Include DESCRIPTION column
+art spelunk --verbose
+
+# Structured output formats
+art spelunk --output=json
+art spelunk --output=yaml
+art spelunk --output=md
 ```
 
 Example output:
 
 ```
-NAME                              TYPE      TOOL      DESCRIPTION
-helping-hand (imported: favs)     skill     claude    A helpful assistant
-utility-tool                      skill     claude    -
-reviewer                          agent     claude    Reviews code changes
-deploy                            command   opencode  -
+NAME                              TYPE      LOCATION
+helping-hand (imported: favs)     skill     skills/helping-hand
+utility-tool                      skill     skills/utility-tool
+reviewer                          agent     agents/reviewer.md
+deploy                            command   .opencode/commands/deploy.md
 ```
 
-The `(imported: ...)` marker appears when an artifact was previously imported via `art import`, showing which vault it came from.
+The `(imported: ...)` marker appears when an artifact was previously imported via `art import`, showing which vault it came from. Global spelunk paths are collapsed to `~/`. Use `--verbose` to add a DESCRIPTION column.
 
 ### Storing Artifacts
 

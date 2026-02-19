@@ -32,6 +32,7 @@ def load_config() -> dict[str, Any]:
             "default_tool": DEFAULT_TOOL,
             "vault_names": {},
             "tools": {},
+            "nav_mode": None,
         }
 
     with open(config_path, "r", encoding="utf-8") as f:
@@ -44,6 +45,7 @@ def load_config() -> dict[str, Any]:
             "default_tool": DEFAULT_TOOL,
             "vault_names": {},
             "tools": {},
+            "nav_mode": None,
         }
 
     if "vaults" not in config:
@@ -56,6 +58,8 @@ def load_config() -> dict[str, Any]:
         config["vault_names"] = {}
     if "tools" not in config:
         config["tools"] = {}
+    if "nav_mode" not in config:
+        config["nav_mode"] = None
 
     return config
 
@@ -157,6 +161,19 @@ def load_cwd_vault_tools() -> dict[str, dict]:
         return {}
 
     return data.get("tools", {}) or {}
+
+
+def get_nav_mode() -> str | None:
+    """Get the configured nav_mode from config.yaml."""
+    config = load_config()
+    return config.get("nav_mode")
+
+
+def set_nav_mode(mode: str | None) -> None:
+    """Set the nav_mode in config.yaml."""
+    config = load_config()
+    config["nav_mode"] = mode
+    save_config(config)
 
 
 def save_vault_metadata(vault_path: str | Path, metadata: dict[str, Any]) -> None:

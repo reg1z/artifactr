@@ -1400,6 +1400,98 @@ class TestHandleSpelunk:
         out = capsys.readouterr().out
         assert "No artifacts found" in out
 
+    def test_location_column_present_no_tool_column(self, make_vault, capsys):
+        """LOCATION column shown; TOOL column absent in human format."""
+        vault = make_vault()
+        args = argparse.Namespace(
+            target=str(vault),
+            global_spelunk=False,
+            tools=None,
+            skills=None,
+            commands=None,
+            agents=None,
+            verbose=False,
+            depth=2,
+            format="human",
+        )
+        rc = handle_spelunk(args)
+
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "LOCATION" in out
+        assert "TOOL" not in out
+        assert "DESCRIPTION" not in out
+
+    def test_verbose_flag_adds_description(self, make_vault, capsys):
+        """--verbose re-enables the DESCRIPTION column."""
+        vault = make_vault()
+        args = argparse.Namespace(
+            target=str(vault),
+            global_spelunk=False,
+            tools=None,
+            skills=None,
+            commands=None,
+            agents=None,
+            verbose=True,
+            depth=2,
+            format="human",
+        )
+        rc = handle_spelunk(args)
+
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "DESCRIPTION" in out
+        assert "LOCATION" in out
+
+    def test_location_is_relative_to_vault_root(self, make_vault, capsys):
+        """LOCATION column is relative to the vault root, not absolute."""
+        vault = make_vault()
+        args = argparse.Namespace(
+            target=str(vault),
+            global_spelunk=False,
+            tools=None,
+            skills=None,
+            commands=None,
+            agents=None,
+            verbose=False,
+            depth=2,
+            format="human",
+        )
+        rc = handle_spelunk(args)
+
+        assert rc == 0
+        out = capsys.readouterr().out
+        # Path should be relative (not absolute), so no leading '/'
+        for line in out.splitlines()[1:]:  # skip header
+            if line.strip():
+                cols = [c.strip() for c in line.split("  ") if c.strip()]
+                # location col should be a relative path like "skills/my-skill"
+                if len(cols) >= 3:
+                    loc = cols[2]
+                    assert not loc.startswith("/"), f"Expected relative path, got: {loc}"
+
+    def test_markdown_format_has_location_column(self, make_vault, capsys):
+        """Markdown format output uses Location column, not Source/Path."""
+        vault = make_vault()
+        args = argparse.Namespace(
+            target=str(vault),
+            global_spelunk=False,
+            tools=None,
+            skills=None,
+            commands=None,
+            agents=None,
+            verbose=False,
+            depth=2,
+            format="md",
+        )
+        rc = handle_spelunk(args)
+
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Location" in out
+        assert "Source" not in out
+        assert "Path" not in out
+
 
 # ---------------------------------------------------------------------------
 # 10.13: art store with type filters

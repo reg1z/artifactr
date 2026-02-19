@@ -3,9 +3,14 @@
 This module provides business logic for managing vaults, separate from CLI parsing.
 """
 
+import fnmatch
 import re
+import shutil
+import zipfile
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 from .config import load_config, save_config
 
@@ -393,3 +398,307 @@ def list_tools_info(supported_tools: list[str]) -> dict[str, Any]:
     """
     config = load_config()
     return {"tools": supported_tools, "default": config["default_tool"]}
+
+
+# ---------------------------------------------------------------------------
+# Vault copy
+# ---------------------------------------------------------------------------
+
+_VAULT_ARTIFACT_DIRS = ("skills", "commands", "agents")
+
+
+def copy_vault(
+    source: str,
+    dest: str,
+    copy_all: bool = False,
+) -> dict[str, Any]:
+    """Copy a vault to a new location and auto-register the copy.
+
+    Args:
+        source: Source vault name or path.
+        dest: Destination path or plain name (no path separator → fallback location).
+        copy_all: If True, copy all vault contents except .git/. Default: artifact dirs + vault.yaml only.
+
+    Returns:
+        Result dict with keys:
+            - success: bool
+            - dest_path: str destination path (if success)
+            - name: str vault name assigned
+            - error: str | None
+    """
+    from .config import get_config_dir, load_vault_metadata, save_vault_metadata
+
+    config = load_config()
+    source_path = _resolve_vault_identifier(source, config)
+    if source_path is None:
+        # Try direct filesystem path
+        p = Path(source).resolve()
+        if p.is_dir():
+            source_path = str(p)
+        else:
+            return {"success": False, "dest_path": None, "name": None, "error": f"Source vault not found: {source}"}
+
+    source_dir = Path(source_path)
+
+    # Resolve destination
+    if "/" in dest or "\\" in dest or dest.startswith(".") or dest.startswith("~"):
+        dest_dir = Path(dest).expanduser().resolve()
+        vault_name = dest_dir.name
+    else:
+        # Plain name → fallback location
+        vault_name = dest
+        dest_dir = get_config_dir() / "vaults" / dest
+
+    if dest_dir.exists():
+        return {"success": False, "dest_path": None, "name": None, "error": f"Destination already exists: {dest_dir}"}
+
+    dest_dir.mkdir(parents=True)
+
+    if copy_all:
+        # Copy everything except .git/
+        for item in source_dir.iterdir():
+            if item.name == ".git":
+                continue
+            dest_item = dest_dir / item.name
+            if item.is_dir():
+                shutil.copytree(item, dest_item)
+            else:
+                shutil.copy2(item, dest_item)
+    else:
+        # Copy only artifact dirs and vault.yaml
+        for dirname in _VAULT_ARTIFACT_DIRS:
+            src_sub = source_dir / dirname
+            if src_sub.is_dir():
+                shutil.copytree(src_sub, dest_dir / dirname)
+        src_yaml = source_dir / "vault.yaml"
+        if src_yaml.exists():
+            shutil.copy2(src_yaml, dest_dir / "vault.yaml")
+
+    # Update vault.yaml with new name
+    meta = load_vault_metadata(dest_dir)
+    meta["name"] = vault_name
+    save_vault_metadata(dest_dir, meta)
+
+    # Auto-register
+    reg_result = add_vaults([str(dest_dir)], name=vault_name)
+
+    return {
+        "success": True,
+        "dest_path": str(dest_dir),
+        "name": vault_name,
+        "error": None,
+        "registration": reg_result,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Vault export
+# ---------------------------------------------------------------------------
+
+def export_vaults(
+    vault_paths: list[str],
+    vault_names: list[str],
+    output_path: str,
+) -> dict[str, Any]:
+    """Export vaults to a zip archive with manifest.yaml.
+
+    Args:
+        vault_paths: List of absolute vault directory paths to export.
+        vault_names: Corresponding names for each vault (parallel list).
+        output_path: Path for the output .zip file.
+
+    Returns:
+        Result dict with keys:
+            - success: bool
+            - output: str output path (if success)
+            - error: str | None
+    """
+    out = Path(output_path)
+    if out.exists():
+        return {"success": False, "output": None, "error": f"Output file already exists: {output_path}"}
+
+    manifest_entries = []
+
+    with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for vault_path, vault_name in zip(vault_paths, vault_names):
+            dir_name = vault_name
+            manifest_entries.append({"name": vault_name, "dir": dir_name})
+            vault_dir = Path(vault_path)
+
+            # Write artifact dirs and vault.yaml
+            for item_name in (*_VAULT_ARTIFACT_DIRS, "vault.yaml"):
+                item = vault_dir / item_name
+                if item.is_dir():
+                    for file in item.rglob("*"):
+                        if file.is_file():
+                            arcname = f"{dir_name}/{item_name}/{file.relative_to(item)}"
+                            zf.write(file, arcname)
+                elif item.is_file():
+                    zf.write(item, f"{dir_name}/{item_name}")
+
+        # Write manifest.yaml
+        manifest_yaml = yaml.dump({"vaults": manifest_entries}, default_flow_style=False)
+        zf.writestr("manifest.yaml", manifest_yaml)
+
+    return {"success": True, "output": str(out), "error": None}
+
+
+def resolve_vaults_for_export(
+    vaults_spec: str | None,
+    export_all: bool,
+) -> dict[str, Any]:
+    """Resolve vault paths and names for export given a spec string.
+
+    Args:
+        vaults_spec: Comma-separated vault names or a single glob pattern. None if --all.
+        export_all: If True, select all registered vaults.
+
+    Returns:
+        Result dict with keys:
+            - success: bool
+            - vault_paths: list[str]
+            - vault_names: list[str]
+            - error: str | None
+    """
+    config = load_config()
+
+    if export_all:
+        paths = config["vaults"]
+        names = [config["vault_names"].get(p, Path(p).name) for p in paths]
+        return {"success": True, "vault_paths": paths, "vault_names": names, "error": None}
+
+    if vaults_spec is None:
+        return {"success": False, "vault_paths": [], "vault_names": [], "error": "No vault specified. Provide vault names or use --all."}
+
+    # Try comma-separated first
+    if "," in vaults_spec:
+        specs = [s.strip() for s in vaults_spec.split(",")]
+    else:
+        specs = [vaults_spec.strip()]
+
+    # Check if it's a glob pattern (single spec with wildcard)
+    all_names = {config["vault_names"].get(p, Path(p).name): p for p in config["vaults"]}
+
+    selected_paths: list[str] = []
+    selected_names: list[str] = []
+
+    if len(specs) == 1 and any(c in specs[0] for c in ("*", "?", "[")):
+        # Glob pattern
+        pattern = specs[0]
+        for name, path in all_names.items():
+            if fnmatch.fnmatch(name, pattern):
+                selected_paths.append(path)
+                selected_names.append(name)
+        if not selected_paths:
+            return {"success": False, "vault_paths": [], "vault_names": [], "error": f"No vaults match pattern: {pattern}"}
+    else:
+        for spec in specs:
+            resolved = _resolve_vault_identifier(spec, config)
+            if resolved is None:
+                return {"success": False, "vault_paths": [], "vault_names": [], "error": f"Vault not found: {spec}"}
+            name = config["vault_names"].get(resolved, Path(resolved).name)
+            selected_paths.append(resolved)
+            selected_names.append(name)
+
+    return {"success": True, "vault_paths": selected_paths, "vault_names": selected_names, "error": None}
+
+
+# ---------------------------------------------------------------------------
+# Vault import
+# ---------------------------------------------------------------------------
+
+def import_vaults_from_zip(
+    archive_path: str,
+    dest_dir: str | None,
+) -> dict[str, Any]:
+    """Extract vaults from a zip archive and register them.
+
+    Args:
+        archive_path: Path to the .zip archive.
+        dest_dir: Directory to extract into. None → config_dir/vaults/.
+
+    Returns:
+        Result dict with keys:
+            - success: bool
+            - extracted: list[dict] with name, path for each vault
+            - errors: list[str] per-vault errors
+            - dest: str destination directory used
+            - error: str | None (fatal errors only)
+    """
+    from .config import get_config_dir
+
+    arc = Path(archive_path)
+    if not arc.exists() or not arc.is_file():
+        return {"success": False, "extracted": [], "errors": [], "dest": None, "error": f"Archive not found: {archive_path}"}
+
+    try:
+        if not zipfile.is_zipfile(arc):
+            return {"success": False, "extracted": [], "errors": [], "dest": None, "error": f"Not a valid zip archive: {archive_path}"}
+    except OSError as e:
+        return {"success": False, "extracted": [], "errors": [], "dest": None, "error": str(e)}
+
+    with zipfile.ZipFile(arc, "r") as zf:
+        names_in_zip = zf.namelist()
+        if "manifest.yaml" not in names_in_zip:
+            return {"success": False, "extracted": [], "errors": [], "dest": None, "error": "Archive does not contain manifest.yaml"}
+
+        manifest_data = yaml.safe_load(zf.read("manifest.yaml").decode("utf-8"))
+
+    if not manifest_data or "vaults" not in manifest_data:
+        return {"success": False, "extracted": [], "errors": [], "dest": None, "error": "manifest.yaml is invalid or missing 'vaults' key"}
+
+    if dest_dir is None:
+        dest = get_config_dir() / "vaults"
+    else:
+        dest = Path(dest_dir).expanduser().resolve()
+
+    dest.mkdir(parents=True, exist_ok=True)
+
+    extracted: list[dict[str, Any]] = []
+    errors: list[str] = []
+
+    config = load_config()
+
+    with zipfile.ZipFile(arc, "r") as zf:
+        for entry in manifest_data["vaults"]:
+            vault_name = entry.get("name")
+            vault_dir_name = entry.get("dir", vault_name)
+            vault_dest = dest / vault_dir_name
+
+            # Check for conflicts
+            if str(vault_dest.resolve()) in config["vaults"]:
+                errors.append(f"Path conflict: {vault_dest} already registered")
+                continue
+            for existing_path, existing_name in config["vault_names"].items():
+                if existing_name == vault_name:
+                    errors.append(f"Name conflict: '{vault_name}' already registered (path: {existing_path})")
+                    break
+            else:
+                # Extract vault directory
+                prefix = f"{vault_dir_name}/"
+                for member in zf.infolist():
+                    if member.filename.startswith(prefix):
+                        rel = member.filename[len(prefix):]
+                        if not rel:
+                            continue
+                        target = vault_dest / rel
+                        if member.filename.endswith("/"):
+                            target.mkdir(parents=True, exist_ok=True)
+                        else:
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            target.write_bytes(zf.read(member.filename))
+
+                # Register
+                reg = add_vaults([str(vault_dest)], name=vault_name)
+                if reg["errors"]:
+                    errors.extend(reg["errors"])
+                else:
+                    extracted.append({"name": vault_name, "path": str(vault_dest)})
+
+    return {
+        "success": True,
+        "extracted": extracted,
+        "errors": errors,
+        "dest": str(dest),
+        "error": None,
+    }

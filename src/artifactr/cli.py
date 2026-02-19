@@ -5,6 +5,8 @@ Program logic is decoupled from CLI invocations to allow for future GUI developm
 """
 
 import argparse
+import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -12,20 +14,25 @@ from typing import Any
 from . import __version__
 from .catalog import (
     add_vaults,
+    copy_vault,
     create_vault_directory,
+    export_vaults,
     get_default_tool,
     get_default_vault,
     get_vault_by_name_or_path,
     get_vault_hierarchy,
+    import_vaults_from_zip,
     init_vault,
     list_tools_info,
     list_vaults,
     name_vault,
     remove_vaults,
+    resolve_vaults_for_export,
     select_default,
     select_default_tool,
 )
 from .config import (
+    get_nav_mode,
     load_active_vault_tools,
     load_all_vault_tools,
     load_cwd_vault_tools,
@@ -61,6 +68,22 @@ from .tools import (
     get_tool_source,
     resolve_tool_name,
 )
+
+
+# Reserved type tokens for `art nav` target resolution
+# These take precedence over vault names when used as a bare nav target
+_NAV_TYPE_ALIASES: dict[str, str] = {
+    "skills": "skills",
+    "s": "skills",
+    "sk": "skills",
+    "commands": "commands",
+    "c": "commands",
+    "cmd": "commands",
+    "com": "commands",
+    "agents": "agents",
+    "a": "agents",
+    "agt": "agents",
+}
 
 
 def add_type_filter_args(parser: argparse.ArgumentParser, allow_names: bool = True) -> None:
@@ -227,15 +250,20 @@ def create_parser() -> ArtArgumentParser:
             "Vault Operations:\n"
             "  ls              List artifacts in a vault\n"
             "  rm              Remove artifacts from a vault\n"
+            "  copy     (cp)   Copy artifacts within or across vaults\n"
             "  store    (st)   Store artifacts from a directory into a vault\n"
             "  edit     (ed)   Edit an artifact in your editor\n"
             "  create   (cr)   Create new artifacts (skill, command, agent)\n"
             "\n"
             "Namespaces:\n"
-            "  vault    (v)    Manage vaults (add, init, rm, name, select, ls)\n"
+            "  vault    (v)    Manage vaults (add, init, rm, name, select, ls, copy, export, import)\n"
             "  tool     (t)    Manage tools (select, ls, add, rm, info)\n"
             "  project  (p)    Project-side artifact operations (import, rm, wipe, ls, link, unlink)\n"
             "  config   (c)    Tool-specific global configs & artifactr settings (import, rm, wipe, ls, link, unlink, edit)\n"
+            "  shell           Shell integration utilities (setup)\n"
+            "\n"
+            "Navigation:\n"
+            "  nav             Navigate to a vault or artifact-type directory\n"
             "\n"
             "Discovery:\n"
             "  spelunk  (sp)   Discover artifacts in a directory, vault, or global config\n"
@@ -337,6 +365,115 @@ def create_parser() -> ArtArgumentParser:
         **make_help(summary="Set the default vault."),
     )
     vault_select.add_argument("path", help="Vault name or path to set as default")
+
+    # vault copy (alphabetical: after select)
+    vault_copy_parser = vault_subparsers.add_parser(
+        "copy", aliases=["cp"], help="Copy a vault to a new location",
+        show_help_on_error=True,
+        **make_help(
+            summary=(
+                "Duplicate a vault to a new path and auto-register the copy in the catalog. "
+                "Source can be a registered vault name or a filesystem path. "
+                "If dest contains no path separator it is treated as a new vault name "
+                "and placed under the configured vaults directory."
+            ),
+            aliases=["cp"],
+            workflows="art vault copy <source> <dest> → art vault ls",
+            see_also=[
+                ("art vault export", "Pack one or more vaults into a portable .zip archive"),
+                ("art copy", "Copy individual artifacts within or across vaults"),
+            ],
+            notes=(
+                "Default scope: skills/, commands/, agents/, vault.yaml only. "
+                "Use --all to include additional files (always excludes .git/)."
+            ),
+        ),
+    )
+    vault_copy_parser.add_argument(
+        "source",
+        help="Source vault name or path",
+    )
+    vault_copy_parser.add_argument(
+        "dest",
+        help=(
+            "Destination path or bare name. "
+            "No path separator → placed at <config_dir>/vaults/<name>/. "
+            "Path with separators → used verbatim."
+        ),
+    )
+    vault_copy_parser.add_argument(
+        "-a", "--all", action="store_true", dest="copy_all",
+        help="Copy all vault contents except .git/ (default: artifact dirs + vault.yaml only)",
+    )
+
+    # vault export
+    vault_export_parser = vault_subparsers.add_parser(
+        "export", help="Export vaults to a zip archive",
+        show_help_on_error=True,
+        **make_help(
+            summary=(
+                "Export one or more registered vaults to a self-contained .zip archive. "
+                "The archive contains per-vault artifact directories, vault.yaml files, "
+                "and a manifest.yaml at the root for use with 'art vault import'."
+            ),
+            workflows="art vault export <vaults> bundle.zip → art vault import bundle.zip",
+            see_also=[
+                ("art vault import", "Extract and register vaults from a .zip archive"),
+                ("art vault copy", "Duplicate a vault locally without archiving"),
+            ],
+            notes=(
+                "Vaults spec: comma-separated names (vault-1,vault-2), glob pattern ('claude-*'), or --all. "
+                "Quote glob patterns to prevent shell expansion."
+            ),
+        ),
+    )
+    vault_export_parser.add_argument(
+        "vaults_spec", nargs="?", default=None,
+        help="Comma-separated vault names or glob pattern (e.g. 'claude-*'); omit when using --all",
+    )
+    vault_export_parser.add_argument(
+        "output",
+        help="Output .zip file path (must not already exist)",
+    )
+    vault_export_parser.add_argument(
+        "-a", "--all", action="store_true", dest="export_all",
+        help="Export all registered vaults",
+    )
+
+    # vault import
+    vault_import_parser = vault_subparsers.add_parser(
+        "import", help="Import vaults from a zip archive",
+        show_help_on_error=True,
+        **make_help(
+            summary=(
+                "Extract vaults from a .zip archive created by 'art vault export' and register them. "
+                "Reads manifest.yaml from the archive to determine vault names and directory layout. "
+                "Each vault is extracted as a direct subdirectory of the destination."
+            ),
+            workflows="art vault export bundle.zip → art vault import bundle.zip",
+            see_also=[
+                ("art vault export", "Create a portable .zip archive of one or more vaults"),
+                ("art vault ls", "Confirm newly imported vaults are registered"),
+            ],
+            notes=(
+                "Default destination: <config_dir>/vaults/. "
+                "Confirmation is required unless -y/--yes is passed. "
+                "Vaults that would create name or path conflicts are skipped with an error; others still import."
+            ),
+        ),
+    )
+    vault_import_parser.add_argument(
+        "archive",
+        help="Path to the .zip archive produced by 'art vault export'",
+    )
+    vault_import_parser.add_argument(
+        "dest", nargs="?", default=None,
+        help="Destination directory for extracted vaults (default: <config_dir>/vaults/)",
+    )
+    vault_import_parser.add_argument(
+        "-y", "--yes", action="store_true",
+        help="Skip confirmation prompt and extract immediately",
+    )
 
     # tool command with subcommands
     tool_parser = subparsers.add_parser(
@@ -484,7 +621,84 @@ def create_parser() -> ArtArgumentParser:
         "--format", choices=["human", "json", "yaml", "md", "markdown"], default="human",
         help="Output format (default: human)",
     )
+    spelunk_parser.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Include DESCRIPTION column in human-format output",
+    )
     add_type_filter_args(spelunk_parser)
+
+    # nav command
+    nav_parser = subparsers.add_parser(
+        "nav", help="Navigate to a vault or artifact-type directory",
+        **make_help(
+            summary=(
+                "Navigate to a vault or artifact-type directory. "
+                "Target can be a type alias (skills, s, sk, commands, c, cmd, agents, a, agt), "
+                "a registered vault name, or a vault/type path. "
+                "Omit target to navigate to the default vault root."
+            ),
+            workflows="art shell setup → art nav [target]",
+            see_also=[
+                ("art shell setup", "Install shell wrapper for seamless cd behavior"),
+                ("art vault ls", "List registered vaults and their paths"),
+            ],
+            notes=(
+                "Set a default mode with nav_mode in config.yaml (wrapper|spawn|window|print). "
+                "Flags --print, --spawn, -w override the config for a single invocation."
+            ),
+        ),
+    )
+    nav_parser.add_argument(
+        "target", nargs="?", default=None,
+        help=(
+            "Type alias (skills/s/sk, commands/c/cmd/com, agents/a/agt), "
+            "vault name, or vault/type path (default: default vault root)"
+        ),
+    )
+    nav_parser.add_argument(
+        "--print", action="store_true", dest="nav_print",
+        help="Print resolved path to stdout — consumed by the shell wrapper function installed by 'art shell setup'",
+    )
+    nav_parser.add_argument(
+        "-s", "--spawn", action="store_true",
+        help="Launch an interactive subshell with its cwd set to the resolved path",
+    )
+    nav_parser.add_argument(
+        "-w", "--window", action="store_true",
+        help="Open a new terminal window at the resolved path (best-effort; uses $TERMINAL then platform fallbacks)",
+    )
+
+    # shell namespace
+    shell_parser = subparsers.add_parser(
+        "shell", help="Shell integration utilities",
+        show_help_on_error=True,
+        **make_help(
+            summary="Shell integration utilities for Artifactr.",
+            see_also=[("art nav", "Navigate to vault/type directories using the installed wrapper")],
+        ),
+    )
+    shell_subparsers = shell_parser.add_subparsers(dest="shell_command", parser_class=ArtArgumentParser)
+
+    shell_setup = shell_subparsers.add_parser(
+        "setup", help="Install shell wrapper function into rc file",
+        **make_help(
+            summary=(
+                "Detect your shell and append the art() wrapper function to its rc file. "
+                "The wrapper intercepts 'art nav' invocations and evaluates the result as a cd command, "
+                "enabling seamless directory navigation from your shell."
+            ),
+            workflows="art shell setup → source <rcfile> → art nav [target]",
+            see_also=[("art nav", "Use the wrapper after setup to navigate vaults")],
+            notes=(
+                "Supports bash, zsh, sh, fish, and PowerShell. "
+                "Fish writes a standalone ~/.config/fish/functions/art.fish instead of appending to config.fish."
+            ),
+        ),
+    )
+    shell_setup.add_argument(
+        "-y", "--yes", action="store_true",
+        help="Skip all confirmation and preview prompts — write snippet immediately",
+    )
 
     # project namespace (art project / art proj)
     project_parser = subparsers.add_parser(
@@ -799,6 +1013,46 @@ def create_parser() -> ArtArgumentParser:
         help="Skip confirmation prompt",
     )
     add_type_filter_args(conf_wipe)
+
+    # copy command (art copy / art cp)
+    copy_parser = subparsers.add_parser(
+        "copy", aliases=["cp"], help="Copy artifacts within or across vaults",
+        show_help_on_error=True,
+        **make_help(
+            summary=(
+                "Copy one or more artifacts within or across vaults using cp-style positional syntax. "
+                "Source format: [vault/][type/]name-or-glob. "
+                "Glob wildcards (* ? [...]) expand to all matching artifacts. "
+                "Frontmatter 'name:' fields are searched as a fallback when no filename match is found."
+            ),
+            aliases=["cp"],
+            see_also=[
+                ("art vault copy", "Duplicate an entire vault to a new location"),
+                ("art ls", "List artifacts available in a vault"),
+                ("art store", "Capture project artifacts into a vault"),
+            ],
+            notes=(
+                "Destination: trailing slash or a registered vault name = copy into that vault. "
+                "No trailing slash and unregistered name = rename/duplicate within the source vault. "
+                "Type prefixes: s/sk/skills, c/cmd/com/commands, a/agt/agents."
+            ),
+        ),
+    )
+    copy_parser.add_argument(
+        "source",
+        help=(
+            "Source artifact specifier: [vault/][type/]name-or-glob. "
+            "Examples: my-skill, skills/my-skill, vault-1/my-skill, vault-1/skills/my-skill, skills/*"
+        ),
+    )
+    copy_parser.add_argument(
+        "dest",
+        help=(
+            "Destination: 'vault-name/' or 'vault-name' (container) copies into the vault; "
+            "'vault/new-name' copies to a named vault with a new name; "
+            "bare 'new-name' duplicates within the source vault."
+        ),
+    )
 
     # store command
     store_parser = subparsers.add_parser(
@@ -2290,6 +2544,13 @@ def handle_vault_add(args: argparse.Namespace) -> int:
     name = getattr(args, "name", None)
     set_default = getattr(args, "set_default", False)
 
+    if name and name in _NAV_TYPE_ALIASES:
+        print(
+            f"Warning: '{name}' is a reserved type token. "
+            f"'art nav {name}' will navigate to the artifact type directory, not this vault.",
+            file=sys.stderr,
+        )
+
     if name and len(args.paths) > 1:
         print("Error: --name can only be used when adding a single vault.", file=sys.stderr)
         return 1
@@ -2329,6 +2590,13 @@ def handle_vault_init(args: argparse.Namespace) -> int:
     name = getattr(args, "name", None)
     set_default = getattr(args, "set_default", False)
     yes = getattr(args, "yes", False)
+
+    if name and name in _NAV_TYPE_ALIASES:
+        print(
+            f"Warning: '{name}' is a reserved type token. "
+            f"'art nav {name}' will navigate to the artifact type directory, not this vault.",
+            file=sys.stderr,
+        )
 
     result = init_vault(args.target_dir, name=name)
 
@@ -2455,6 +2723,82 @@ def handle_vault_name(args: argparse.Namespace) -> int:
     else:
         print(f"Error: {result['error']}", file=sys.stderr)
         return 1
+
+
+def handle_vault_copy(args: argparse.Namespace) -> int:
+    """Handle the vault copy command."""
+    copy_all = getattr(args, "copy_all", False)
+    result = copy_vault(args.source, args.dest, copy_all=copy_all)
+    if result["success"]:
+        print(f"Copied vault to: {result['dest_path']} (name: {result['name']})")
+        return 0
+    else:
+        print(f"Error: {result['error']}", file=sys.stderr)
+        return 1
+
+
+def handle_vault_export(args: argparse.Namespace) -> int:
+    """Handle the vault export command."""
+    export_all = getattr(args, "export_all", False)
+    vaults_spec = getattr(args, "vaults_spec", None)
+    output = args.output
+
+    sel = resolve_vaults_for_export(vaults_spec, export_all)
+    if not sel["success"]:
+        print(f"Error: {sel['error']}", file=sys.stderr)
+        return 1
+
+    result = export_vaults(sel["vault_paths"], sel["vault_names"], output)
+    if result["success"]:
+        print(f"Exported {len(sel['vault_paths'])} vault(s) to: {result['output']}")
+        return 0
+    else:
+        print(f"Error: {result['error']}", file=sys.stderr)
+        return 1
+
+
+def handle_vault_import(args: argparse.Namespace) -> int:
+    """Handle the vault import command."""
+    from .config import get_config_dir as _get_config_dir
+
+    archive = args.archive
+    dest = getattr(args, "dest", None)
+    yes = getattr(args, "yes", False)
+
+    # Determine destination for display
+    if dest is None:
+        dest_display = str(_get_config_dir() / "vaults")
+    else:
+        dest_display = str(Path(dest).expanduser().resolve())
+
+    # Preview and confirm
+    if not yes:
+        print(f"Archive: {archive}")
+        print(f"Destination: {dest_display}")
+        try:
+            confirm = input("Proceed with extraction? [y/N]: ")
+        except EOFError:
+            confirm = "n"
+        if confirm.strip().lower() not in ("y", "yes"):
+            print("Aborted.")
+            return 0
+
+    result = import_vaults_from_zip(archive, dest)
+    if result["error"]:
+        print(f"Error: {result['error']}", file=sys.stderr)
+        return 1
+
+    for extracted in result["extracted"]:
+        print(f"Imported vault '{extracted['name']}' → {extracted['path']}")
+
+    for err in result["errors"]:
+        print(f"Warning: {err}", file=sys.stderr)
+
+    if not result["extracted"]:
+        print("No vaults were imported.")
+        return 1 if result["errors"] else 0
+
+    return 0
 
 
 def handle_tool_select(args: argparse.Namespace) -> int:
@@ -2980,6 +3324,496 @@ def parse_selection(selection: str, max_val: int) -> list[int]:
     return sorted(indices)
 
 
+def _resolve_copy_type(prefix: str) -> str | None:
+    """Resolve a type prefix to its canonical subdirectory name."""
+    type_map = {
+        "skill": "skills", "skills": "skills", "s": "skills", "sk": "skills",
+        "command": "commands", "commands": "commands", "c": "commands", "cmd": "commands", "com": "commands",
+        "agent": "agents", "agents": "agents", "a": "agents", "agt": "agents", "ag": "agents",
+    }
+    return type_map.get(prefix)
+
+
+def _resolve_copy_source(source_spec: str) -> dict[str, Any]:
+    """Parse and resolve a copy source specifier.
+
+    Source format: [vault/][type/]name-or-glob
+
+    Returns dict with:
+        - vault_path: str resolved vault path
+        - type_subdir: str | None (e.g. 'skills')
+        - name_pattern: str (name or glob pattern)
+        - error: str | None
+    """
+    parts = source_spec.split("/")
+
+    vault_path: str | None = None
+    type_subdir: str | None = None
+    name_pattern: str
+
+    if len(parts) == 1:
+        # bare name — use default vault
+        name_pattern = parts[0]
+        vault_path = get_default_vault()
+        if vault_path is None:
+            return {"vault_path": None, "type_subdir": None, "name_pattern": name_pattern,
+                    "error": "No default vault set."}
+    elif len(parts) == 2:
+        first, second = parts
+        resolved_type = _resolve_copy_type(first)
+        if resolved_type is not None:
+            type_subdir = resolved_type
+            name_pattern = second
+            vault_path = get_default_vault()
+            if vault_path is None:
+                return {"vault_path": None, "type_subdir": type_subdir, "name_pattern": name_pattern,
+                        "error": "No default vault set."}
+        else:
+            resolved = get_vault_by_name_or_path(first)
+            if resolved is not None:
+                vault_path = resolved
+                name_pattern = second
+            else:
+                name_pattern = source_spec
+                vault_path = get_default_vault()
+                if vault_path is None:
+                    return {"vault_path": None, "type_subdir": None, "name_pattern": name_pattern,
+                            "error": "No default vault set."}
+    elif len(parts) == 3:
+        vault_spec, type_spec, name_pattern = parts
+        resolved = get_vault_by_name_or_path(vault_spec)
+        if resolved is None:
+            return {"vault_path": None, "type_subdir": None, "name_pattern": name_pattern,
+                    "error": f"Vault not found: {vault_spec}"}
+        vault_path = resolved
+        resolved_type = _resolve_copy_type(type_spec)
+        if resolved_type is None:
+            return {"vault_path": vault_path, "type_subdir": None, "name_pattern": name_pattern,
+                    "error": f"Unknown type alias: {type_spec}"}
+        type_subdir = resolved_type
+    else:
+        return {"vault_path": None, "type_subdir": None, "name_pattern": "/".join(parts),
+                "error": f"Cannot parse source specifier: {source_spec}"}
+
+    return {"vault_path": vault_path, "type_subdir": type_subdir, "name_pattern": name_pattern, "error": None}
+
+
+def _resolve_copy_dest(dest_spec: str, source_vault_path: str) -> dict[str, Any]:
+    """Parse copy destination specifier.
+
+    Returns dict with:
+        - vault_path: str | None (if container destination)
+        - new_name: str | None (if rename destination)
+        - is_container: bool
+        - error: str | None
+    """
+    # Trailing slash → container
+    if dest_spec.endswith("/"):
+        vault_name = dest_spec.rstrip("/")
+        resolved = get_vault_by_name_or_path(vault_name)
+        if resolved is None:
+            return {"vault_path": None, "new_name": None, "is_container": True, "error": f"Vault not found: {vault_name}"}
+        return {"vault_path": resolved, "new_name": None, "is_container": True, "error": None}
+
+    # Check if it's vault/name format
+    if "/" in dest_spec:
+        parts = dest_spec.split("/", 1)
+        vault_spec, new_name = parts
+        resolved = get_vault_by_name_or_path(vault_spec)
+        if resolved is not None:
+            return {"vault_path": resolved, "new_name": new_name, "is_container": False, "error": None}
+
+    # Check if it's a registered vault name (no trailing slash)
+    resolved = get_vault_by_name_or_path(dest_spec)
+    if resolved is not None:
+        return {"vault_path": resolved, "new_name": None, "is_container": True, "error": None}
+
+    # Treat as new artifact name (within source vault)
+    return {"vault_path": source_vault_path, "new_name": dest_spec, "is_container": False, "error": None}
+
+
+def _find_artifacts_in_vault(
+    vault_path: str,
+    type_subdir: str | None,
+    name_pattern: str,
+) -> list[dict[str, Any]]:
+    """Find artifacts in a vault matching type and name/glob pattern.
+
+    Returns list of dicts with 'type_subdir', 'name', 'path' (Path object).
+    """
+    import fnmatch as _fnmatch
+    from .creator import _find_by_frontmatter_name as _fm_find, _parse_frontmatter_name as _fm_parse
+
+    vault_dir = Path(vault_path)
+    is_glob = any(c in name_pattern for c in ("*", "?", "["))
+
+    search_types = [type_subdir] if type_subdir else ["skills", "commands", "agents"]
+    results: list[dict[str, Any]] = []
+
+    for tdir in search_types:
+        type_path = vault_dir / tdir
+        if not type_path.is_dir():
+            continue
+
+        if tdir == "skills":
+            candidates = [
+                {"name": item.name, "path": item}
+                for item in sorted(type_path.iterdir()) if item.is_dir()
+            ]
+        else:
+            candidates = [
+                {"name": item.stem, "path": item}
+                for item in sorted(type_path.iterdir()) if item.is_file() and item.suffix == ".md"
+            ]
+
+        if is_glob:
+            for cand in candidates:
+                # Match by filesystem name
+                if _fnmatch.fnmatch(cand["name"], name_pattern):
+                    results.append({"type_subdir": tdir, "name": cand["name"], "path": cand["path"]})
+                    continue
+                # Match by frontmatter name
+                if tdir == "skills":
+                    fm_file = cand["path"] / "SKILL.md"
+                    if fm_file.is_file():
+                        fm_name = _fm_parse(fm_file)
+                        if fm_name and _fnmatch.fnmatch(fm_name, name_pattern):
+                            results.append({"type_subdir": tdir, "name": cand["name"], "path": cand["path"]})
+                else:
+                    fm_name = _fm_parse(cand["path"])
+                    if fm_name and _fnmatch.fnmatch(fm_name, name_pattern):
+                        results.append({"type_subdir": tdir, "name": cand["name"], "path": cand["path"]})
+        else:
+            # Exact match by name
+            for cand in candidates:
+                if cand["name"] == name_pattern:
+                    results.append({"type_subdir": tdir, "name": cand["name"], "path": cand["path"]})
+                    break
+
+    return results
+
+
+def _copy_artifact_to_vault(
+    artifact: dict[str, Any],
+    dest_vault_path: str,
+    new_name: str | None,
+) -> dict[str, Any]:
+    """Copy a single artifact to a destination vault (or new name in same vault).
+
+    Args:
+        artifact: Dict with 'type_subdir', 'name', 'path'.
+        dest_vault_path: Absolute path string for the destination vault.
+        new_name: If set, rename the artifact; otherwise keep original name.
+
+    Returns:
+        Result dict with 'success', 'dest', 'error'.
+    """
+    dest_vault = Path(dest_vault_path)
+    tdir = artifact["type_subdir"]
+    src_path: Path = artifact["path"]
+    target_name = new_name if new_name else artifact["name"]
+
+    dest_type_dir = dest_vault / tdir
+    dest_type_dir.mkdir(parents=True, exist_ok=True)
+
+    if tdir == "skills":
+        dest = dest_type_dir / target_name
+    else:
+        dest = dest_type_dir / f"{target_name}.md"
+
+    if dest.exists():
+        return {"success": False, "dest": str(dest), "error": f"Destination already exists: {dest}"}
+
+    if src_path.is_dir():
+        shutil.copytree(src_path, dest)
+    else:
+        shutil.copy2(src_path, dest)
+
+    return {"success": True, "dest": str(dest), "error": None}
+
+
+def handle_copy(args: argparse.Namespace) -> int:
+    """Handle the copy command."""
+    source_spec = args.source
+    dest_spec = args.dest
+
+    # Parse source
+    src = _resolve_copy_source(source_spec)
+    if src["error"]:
+        print(f"Error: {src['error']}", file=sys.stderr)
+        return 1
+
+    # Find matching artifacts
+    artifacts = _find_artifacts_in_vault(src["vault_path"], src["type_subdir"], src["name_pattern"])
+
+    is_glob = any(c in src["name_pattern"] for c in ("*", "?", "["))
+
+    if not artifacts and not is_glob:
+        # Try frontmatter name fallback for non-glob
+        from .creator import _find_by_frontmatter_name as _fm_find
+        vault_path = src["vault_path"]
+        type_subdir = src["type_subdir"]
+        subdir_to_type = {"skills": "skill", "commands": "command", "agents": "agent"}
+
+        for tdir in ([type_subdir] if type_subdir else ["skills", "commands", "agents"]):
+            art_type = subdir_to_type.get(tdir, tdir.rstrip("s"))
+            fm_path = _fm_find(art_type, src["name_pattern"], Path(vault_path))
+            if fm_path is not None:
+                if art_type == "skill":
+                    art_path = fm_path.parent
+                else:
+                    art_path = fm_path
+                artifacts.append({
+                    "type_subdir": tdir,
+                    "name": art_path.name if art_type == "skill" else art_path.stem,
+                    "path": art_path,
+                })
+                break
+
+    if not artifacts:
+        print(f"Error: No artifact found matching '{source_spec}'.", file=sys.stderr)
+        return 1
+
+    # Check multi-type name conflict for bare name (no type prefix)
+    if not is_glob and not src["type_subdir"] and len(artifacts) > 1:
+        types_found = [a["type_subdir"] for a in artifacts]
+        hints = ", ".join(f"{t}/{src['name_pattern']}" for t in types_found)
+        print(f"Error: '{src['name_pattern']}' matches multiple types: {types_found}. Use a type prefix: {hints}", file=sys.stderr)
+        return 1
+
+    # Parse destination
+    dst = _resolve_copy_dest(dest_spec, src["vault_path"])
+    if dst["error"]:
+        print(f"Error: {dst['error']}", file=sys.stderr)
+        return 1
+
+    # Multi-artifact requires container destination
+    if len(artifacts) > 1 and not dst["is_container"]:
+        print("Error: Multi-artifact sources require a container destination (trailing slash or registered vault name).", file=sys.stderr)
+        return 1
+
+    dest_vault_path = dst["vault_path"]
+
+    errors = []
+    for artifact in artifacts:
+        new_name = dst["new_name"] if not dst["is_container"] else None
+        result = _copy_artifact_to_vault(artifact, dest_vault_path, new_name)
+        if result["success"]:
+            print(f"Copied: {artifact['name']} → {result['dest']}")
+        else:
+            errors.append(result["error"])
+            print(f"Error: {result['error']}", file=sys.stderr)
+
+    return 1 if errors else 0
+
+
+def handle_nav(args: argparse.Namespace) -> int:
+    """Handle the nav command."""
+    import subprocess as _subprocess
+    from .config import get_nav_mode as _get_nav_mode
+
+    target_arg = getattr(args, "target", None)
+    nav_print = getattr(args, "nav_print", False)
+    spawn = getattr(args, "spawn", False)
+    window = getattr(args, "window", False)
+
+    # Resolve target path
+    default_vault = get_default_vault()
+    if default_vault is None:
+        print("Error: No default vault set. Use 'art vault add' or 'art vault init'.", file=sys.stderr)
+        return 1
+
+    vault_path: Path | None = None
+
+    if target_arg is None:
+        # Default: vault root
+        vault_path = Path(default_vault)
+    elif target_arg in _NAV_TYPE_ALIASES:
+        # Type alias → type subdir of default vault
+        type_subdir = _NAV_TYPE_ALIASES[target_arg]
+        vault_path = Path(default_vault) / type_subdir
+    elif "/" in target_arg:
+        # vault/type format
+        parts = target_arg.split("/", 1)
+        vault_name, type_part = parts[0], parts[1]
+        resolved_vault = get_vault_by_name_or_path(vault_name)
+        if resolved_vault is None:
+            print(f"Error: Unknown vault: {vault_name}", file=sys.stderr)
+            return 1
+        if type_part in _NAV_TYPE_ALIASES:
+            type_subdir = _NAV_TYPE_ALIASES[type_part]
+            vault_path = Path(resolved_vault) / type_subdir
+        else:
+            print(f"Error: Unknown type alias '{type_part}'. Valid: skills, commands, agents (and short forms).", file=sys.stderr)
+            return 1
+    else:
+        # Try as vault name
+        resolved_vault = get_vault_by_name_or_path(target_arg)
+        if resolved_vault is not None:
+            vault_path = Path(resolved_vault)
+        else:
+            print(f"Error: '{target_arg}' is not a recognized type alias or registered vault name.", file=sys.stderr)
+            return 1
+
+    if vault_path is None or not vault_path.is_dir():
+        print(f"Error: Target directory does not exist: {vault_path}", file=sys.stderr)
+        return 1
+
+    # Determine mode (flag > config > error)
+    if nav_print:
+        mode = "print"
+    elif spawn:
+        mode = "spawn"
+    elif window:
+        mode = "window"
+    else:
+        mode = _get_nav_mode()
+        if mode is None:
+            print(
+                "Error: No navigation mode configured.\n"
+                "Options:\n"
+                "  --print   Print the path (for use in shell wrapper — run 'art shell setup')\n"
+                "  --spawn   Open a subshell at the target directory\n"
+                "  --window  Open a new terminal window at the target directory\n"
+                "Set a default in config.yaml with: nav_mode: wrapper|spawn|window|print",
+                file=sys.stderr,
+            )
+            return 1
+        if mode == "wrapper":
+            mode = "print"
+
+    resolved_path = str(vault_path.resolve())
+
+    if mode == "print":
+        print(resolved_path)
+        return 0
+    elif mode == "spawn":
+        shell = os.environ.get("SHELL", "sh") if sys.platform != "win32" else "powershell.exe"
+        _subprocess.run([shell], cwd=resolved_path)
+        return 0
+    elif mode == "window":
+        terminal = os.environ.get("TERMINAL")
+        if terminal:
+            try:
+                _subprocess.Popen([terminal, "--working-directory", resolved_path])
+                return 0
+            except (FileNotFoundError, OSError):
+                pass
+
+        if sys.platform == "darwin":
+            try:
+                _subprocess.Popen(["open", "-a", "Terminal", resolved_path])
+                return 0
+            except (FileNotFoundError, OSError):
+                pass
+        elif sys.platform == "win32":
+            for term in ("wt", "cmd.exe"):
+                try:
+                    _subprocess.Popen([term, "/d", resolved_path])
+                    return 0
+                except (FileNotFoundError, OSError):
+                    continue
+        else:
+            import shutil as _shutil
+            for term in ("xterm", "gnome-terminal", "konsole", "alacritty", "kitty"):
+                if _shutil.which(term):
+                    try:
+                        _subprocess.Popen([term, "--working-directory", resolved_path])
+                        return 0
+                    except (FileNotFoundError, OSError):
+                        continue
+
+        print("Error: No terminal emulator found. Set $TERMINAL or use --spawn instead.", file=sys.stderr)
+        return 1
+
+    return 0
+
+
+def handle_shell_setup(args: argparse.Namespace) -> int:
+    """Handle the shell setup command."""
+    from .utils import detect_shell as _detect_shell
+    from .utils import get_shell_rc_file as _get_shell_rc_file
+    from .utils import get_shell_wrapper_snippet as _get_shell_wrapper_snippet
+
+    yes = getattr(args, "yes", False)
+    shell = _detect_shell()
+    rc_file = _get_shell_rc_file(shell)
+    snippet = _get_shell_wrapper_snippet(shell)
+
+    if rc_file is None:
+        print(f"Error: Unsupported shell: {shell}. Cannot determine rc file.", file=sys.stderr)
+        return 1
+
+    is_fish = shell == "fish"
+
+    print(f"Detected shell: {shell}")
+    print(f"Target file: {rc_file}")
+
+    if not yes:
+        try:
+            preview = input("Preview snippet before applying? [y/N]: ")
+        except EOFError:
+            preview = "n"
+        if preview.strip().lower() in ("y", "yes"):
+            print("\n" + snippet)
+
+        try:
+            confirm = input(f"\nAppend snippet to {rc_file}? [y/N]: ")
+        except EOFError:
+            confirm = "n"
+        if confirm.strip().lower() not in ("y", "yes"):
+            print("Aborted.")
+            return 0
+
+    # Write snippet
+    rc_file.parent.mkdir(parents=True, exist_ok=True)
+
+    if is_fish:
+        if rc_file.exists() and not yes:
+            try:
+                overwrite = input(f"{rc_file} already exists. Overwrite? [y/N]: ")
+            except EOFError:
+                overwrite = "n"
+            if overwrite.strip().lower() not in ("y", "yes"):
+                print("Aborted.")
+                return 0
+        rc_file.write_text(snippet, encoding="utf-8")
+        print(f"\nWrote snippet to {rc_file}")
+    else:
+        with open(rc_file, "a", encoding="utf-8") as f:
+            f.write("\n" + snippet)
+        print(f"\nAppended snippet to {rc_file}")
+
+    if is_fish:
+        print("Fish functions are auto-loaded — no source command needed.")
+    else:
+        print(f"Run: source {rc_file}")
+        print("Or start a new shell session.")
+
+    return 0
+
+
+def _compute_spelunk_location(artifact_path: Path, original_target: Path | None, global_spelunk: bool) -> str:
+    """Compute the display location for a spelunk artifact.
+
+    For global spelunk, returns a home-collapsed absolute path (~/...).
+    For directory/vault spelunk, returns path relative to original_target.
+    Falls back to absolute path if relative_to() fails (e.g. symlink outside root).
+    """
+    if global_spelunk or original_target is None:
+        home = Path.home()
+        try:
+            rel = artifact_path.relative_to(home)
+            return "~/" + str(rel)
+        except ValueError:
+            return str(artifact_path)
+    else:
+        try:
+            return str(artifact_path.relative_to(original_target))
+        except ValueError:
+            return str(artifact_path)
+
+
 def _format_spelunk_data(artifacts: list[dict]) -> list[dict]:
     """Build a shared data structure for spelunk output formatters."""
     return [
@@ -3007,12 +3841,13 @@ def _format_spelunk_yaml(artifacts: list[dict]) -> str:
     return yaml.dump(data, default_flow_style=False)
 
 
-def _format_spelunk_markdown(artifacts: list[dict]) -> str:
+def _format_spelunk_markdown(artifacts: list[dict], original_target: Path | None = None, global_spelunk: bool = False) -> str:
     """Format spelunk results as a markdown table."""
     data = _format_spelunk_data(artifacts)
-    lines = ["| Name | Type | Source | Path |", "| --- | --- | --- | --- |"]
-    for item in data:
-        lines.append(f"| {item['name']} | {item['type']} | {item['source']} | {item['path']} |")
+    lines = ["| Name | Type | Location |", "| --- | --- | --- |"]
+    for item, art in zip(data, artifacts):
+        location = _compute_spelunk_location(art["path"], original_target, global_spelunk)
+        lines.append(f"| {item['name']} | {item['type']} | {location} |")
     return "\n".join(lines)
 
 
@@ -3023,6 +3858,7 @@ def handle_spelunk(args: argparse.Namespace) -> int:
     tools_filter_str = getattr(args, "tools", None)
     depth = getattr(args, "depth", 2)
     output_format = getattr(args, "format", "human")
+    verbose = getattr(args, "verbose", False)
 
     tools_filter = None
     if tools_filter_str:
@@ -3035,13 +3871,18 @@ def handle_spelunk(args: argparse.Namespace) -> int:
 
     type_filters = resolve_type_filters(args)
 
+    # Track the original target for LOCATION column relativization
+    original_target: Path | None = None
+
     if target_str is None or global_spelunk:
         # Global config spelunk
         if target_str is None and not global_spelunk and output_format == "human":
             print("No target specified — spelunking global config directories.\n")
         artifacts = discover_global_artifacts(tools_filter=tools_filter)
+        global_spelunk = True
     else:
         target = Path(target_str).resolve()
+        original_target = target
         if not target.exists() or not target.is_dir():
             print(f"Error: Target directory does not exist: {target_str}", file=sys.stderr)
             return 1
@@ -3066,7 +3907,7 @@ def handle_spelunk(args: argparse.Namespace) -> int:
         elif output_format == "yaml":
             print("[]")
         elif output_format in ("md", "markdown"):
-            print(_format_spelunk_markdown([]))
+            print(_format_spelunk_markdown([], original_target, global_spelunk))
         else:
             print(f"No artifacts found in {label}")
         return 0
@@ -3079,14 +3920,13 @@ def handle_spelunk(args: argparse.Namespace) -> int:
         print(_format_spelunk_yaml(artifacts))
         return 0
     elif output_format in ("md", "markdown"):
-        print(_format_spelunk_markdown(artifacts))
+        print(_format_spelunk_markdown(artifacts, original_target, global_spelunk))
         return 0
 
     # Human format
     import_cache: dict[str, list[str]] = {}
     if target_str and not global_spelunk:
-        target = Path(target_str).resolve()
-        import_cache = load_import_cache(target)
+        import_cache = load_import_cache(original_target or Path(target_str).resolve())
 
     rows = []
     for art in artifacts:
@@ -3102,11 +3942,18 @@ def handle_spelunk(args: argparse.Namespace) -> int:
                     vault_parts.append(vname)
             name_col += f" (imported: {'; '.join(vault_parts)})"
 
-        description = extract_description(art)
-        tool_label = art["tool"]
-        rows.append((name_col, art["type"], tool_label, description))
+        location = _compute_spelunk_location(art["path"], original_target, global_spelunk)
 
-    headers = ("NAME", "TYPE", "TOOL", "DESCRIPTION")
+        if verbose:
+            description = extract_description(art)
+            rows.append((name_col, art["type"], location, description))
+        else:
+            rows.append((name_col, art["type"], location))
+
+    if verbose:
+        headers = ("NAME", "TYPE", "LOCATION", "DESCRIPTION")
+    else:
+        headers = ("NAME", "TYPE", "LOCATION")
     widths = [len(h) for h in headers]
     for row in rows:
         for i, val in enumerate(row):
@@ -3418,6 +4265,15 @@ def _main() -> int:
             return handle_vault_select(args)
         if args.vault_command in ("ls", "list"):
             return handle_vault_list(args)
+        if args.vault_command in ("copy", "cp"):
+            return handle_vault_copy(args)
+        if args.vault_command == "export":
+            return handle_vault_export(args)
+        if args.vault_command == "import":
+            return handle_vault_import(args)
+
+    if args.command in ("copy", "cp"):
+        return handle_copy(args)
 
     if args.command in ("tool", "t"):
         if args.tool_command is None:
@@ -3434,6 +4290,17 @@ def _main() -> int:
             return handle_tool_rm(args)
         if args.tool_command == "info":
             return handle_tool_info(args)
+
+    if args.command == "nav":
+        return handle_nav(args)
+
+    if args.command == "shell":
+        shell_cmd = getattr(args, "shell_command", None)
+        if shell_cmd is None:
+            parser.parse_args(["shell", "--help"])
+            return 0
+        if shell_cmd == "setup":
+            return handle_shell_setup(args)
 
     if args.command in ("spelunk", "sp"):
         return handle_spelunk(args)
