@@ -133,7 +133,7 @@ if (Get-Command art -ErrorAction SilentlyContinue) {
 
     # 5.3 pipx upgrade
     if ($InstallMethod -eq 'pipx') {
-        $output = pipx upgrade artifactr 2>&1 | Out-String
+        $output = & pipx upgrade --pip-args '--no-cache-dir' artifactr 2>$null | Out-String
         if ($output -match 'already installed') {
             Write-Host "artifactr is already up to date."
         }
@@ -144,7 +144,9 @@ if (Get-Command art -ErrorAction SilentlyContinue) {
     }
     # 5.4 venv upgrade
     elseif ($InstallMethod -eq 'venv') {
-        $output = & "$DataDir\.venv\Scripts\pip.exe" install --upgrade artifactr 2>&1 | Out-String
+        $ErrorActionPreference = 'SilentlyContinue'
+        $output = & "$DataDir\.venv\Scripts\pip.exe" install --upgrade --no-cache-dir artifactr 2>$null | Out-String
+        $ErrorActionPreference = 'Stop'
         if ($output -match 'already satisfied') {
             Write-Host "artifactr is already up to date."
         }

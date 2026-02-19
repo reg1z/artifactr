@@ -191,7 +191,7 @@ if command -v art &>/dev/null; then
 
   # 6.2 pipx upgrade
   if [[ "$INSTALL_METHOD" == "pipx" ]]; then
-    upgrade_output="$(pipx upgrade artifactr 2>&1)"
+    upgrade_output="$(pipx upgrade --pip-args="--no-cache-dir" artifactr 2>&1)"
     if echo "$upgrade_output" | grep -q "already installed"; then
       echo "artifactr is already up to date."
     else
@@ -201,7 +201,7 @@ if command -v art &>/dev/null; then
 
   # 6.3 venv upgrade
   elif [[ "$INSTALL_METHOD" == "venv" ]]; then
-    upgrade_output="$("$DATA_DIR/.venv/bin/pip" install --upgrade artifactr 2>&1)"
+    upgrade_output="$("$DATA_DIR/.venv/bin/pip" install --upgrade --no-cache-dir artifactr 2>&1)"
     if echo "$upgrade_output" | grep -q "already satisfied"; then
       echo "artifactr is already up to date."
     else
