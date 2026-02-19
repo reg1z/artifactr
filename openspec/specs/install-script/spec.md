@@ -141,6 +141,8 @@ The installer SHALL support a `--uninstall` flag. When passed, it reads the stat
 ### Requirement: Confirmation model
 Every action that modifies the system (installing, adding to PATH, uninstalling, modifying rc file) SHALL be preceded by a human-readable description of what will happen, followed by a `[y/N]` prompt. If the user answers anything other than `y` or `Y`, the action MUST be skipped. The `--yes` / `-y` flag MUST suppress all prompts and proceed as if the user answered yes to everything.
 
+Prompts MUST read from `/dev/tty` directly (not from stdin) so that interactive input works correctly even when the script is piped via `curl ... | bash`. Using stdin for `read` in a piped context causes immediate EOF, silently defaulting every prompt to `N`.
+
 #### Scenario: Interactive install, user confirms
 - **WHEN** `--yes` is not set and the user types `y` at the install prompt
 - **THEN** installation proceeds
@@ -152,6 +154,10 @@ Every action that modifies the system (installing, adding to PATH, uninstalling,
 #### Scenario: Non-interactive with --yes
 - **WHEN** `--yes` is set
 - **THEN** all prompts are skipped and all actions proceed automatically
+
+#### Scenario: Script piped via curl (stdin is a pipe, not a terminal)
+- **WHEN** the script is invoked as `curl -fsSL URL | bash` without `--yes`
+- **THEN** prompts are still presented interactively by reading from `/dev/tty`, allowing the user to respond normally
 
 ---
 

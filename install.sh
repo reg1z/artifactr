@@ -34,7 +34,7 @@ confirm() {
     return 0
   fi
   printf "%s [y/N] " "$message"
-  read -r response || true
+  read -r response </dev/tty || true
   case "$response" in
   [yY])
     return 0
