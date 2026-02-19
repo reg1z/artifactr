@@ -40,7 +40,8 @@ def get_editor() -> str | None:
         1. $VISUAL environment variable
         2. $EDITOR environment variable
         3. First found from: nano, nvim, vim, vi
-        4. notepad.exe (Windows fallback)
+        4. edit (Windows fallback)
+        5. notepad.exe (Windows fallback)
 
     Returns:
         The editor command string, or None if no editor is found.
@@ -54,8 +55,10 @@ def get_editor() -> str | None:
         if shutil.which(editor):
             return editor
 
-    if platform.system() == "Windows" and shutil.which("notepad.exe"):
-        return "notepad.exe"
+    if platform.system() == "Windows":
+        for editor in ("edit", "notepad.exe"):
+            if shutil.which(editor):
+                return editor
 
     return None
 

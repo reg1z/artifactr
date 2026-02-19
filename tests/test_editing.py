@@ -72,8 +72,18 @@ class TestGetEditor:
 
     @mock.patch("artifactr.utils.platform.system", return_value="Windows")
     @mock.patch("artifactr.utils.shutil.which")
+    def test_fallback_edit_windows(self, mock_which, mock_platform):
+        """Verify edit is used before notepad.exe as a Windows fallback."""
+        mock_which.side_effect = lambda cmd: "C:\\Windows\\edit.com" if cmd == "edit" else None
+        with mock.patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("VISUAL", None)
+            os.environ.pop("EDITOR", None)
+            assert get_editor() == "edit"
+
+    @mock.patch("artifactr.utils.platform.system", return_value="Windows")
+    @mock.patch("artifactr.utils.shutil.which")
     def test_fallback_notepad_windows(self, mock_which, mock_platform):
-        """Verify notepad.exe is used as last fallback on Windows."""
+        """Verify notepad.exe is used as last fallback on Windows when edit is not found."""
         mock_which.side_effect = lambda cmd: "C:\\Windows\\notepad.exe" if cmd == "notepad.exe" else None
         with mock.patch.dict(os.environ, {}, clear=True):
             os.environ.pop("VISUAL", None)
@@ -83,7 +93,7 @@ class TestGetEditor:
     @mock.patch("artifactr.utils.platform.system", return_value="Windows")
     @mock.patch("artifactr.utils.shutil.which")
     def test_no_editor_found_windows(self, mock_which, mock_platform):
-        """Verify None is returned when notepad.exe is also not found on Windows."""
+        """Verify None is returned when no editor is found on Windows."""
         mock_which.return_value = None
         with mock.patch.dict(os.environ, {}, clear=True):
             os.environ.pop("VISUAL", None)
