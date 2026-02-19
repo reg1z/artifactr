@@ -24,11 +24,11 @@ The installer SHALL check that `python3` is available and reports `sys.version_i
 ---
 
 ### Requirement: Windows detection and graceful bail
-The installer SHALL detect when it is running on Windows (via `uname` returning a MINGW/CYGWIN/MSYS prefix or absence of `uname`) and exit with a message directing the user to a forthcoming `install.ps1` script.
+The installer SHALL detect when it is running on Windows (via `uname` returning a MINGW/CYGWIN/MSYS prefix or absence of `uname`) and exit with a message directing the user to `install.ps1`.
 
 #### Scenario: Running on Windows via Git Bash or similar
 - **WHEN** `uname -s` returns a string starting with `MINGW`, `CYGWIN`, or `MSYS`
-- **THEN** the installer prints "Windows detected. A PowerShell installer (install.ps1) is planned. See the README for manual install instructions." and exits non-zero
+- **THEN** the installer prints "Windows detected. Use install.ps1 instead. See the README for instructions." and exits non-zero
 
 ---
 
@@ -174,4 +174,4 @@ The README SHALL be updated under the "Extended Usage" heading to document the o
 
 #### Scenario: Windows note documented
 - **WHEN** a user reads the README under "Extended Usage"
-- **THEN** they can find a note that Windows support (`install.ps1`) is planned and to use `pip install artifactr` in the meantime
+- **THEN** they can find a note directing Windows users to `install.ps1` with the PowerShell one-liner

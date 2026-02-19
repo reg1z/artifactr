@@ -320,7 +320,23 @@ To uninstall:
 curl -fsSL https://raw.githubusercontent.com/reg1z/artifactr/main/install.sh | bash -s -- --uninstall
 ```
 
-> **Windows:** Native PowerShell support (`install.ps1`) is planned. In the meantime, install with `pip install artifactr` or `pipx install artifactr`.
+**Windows** — install with a single command in PowerShell:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/reg1z/artifactr/main/install.ps1 | iex"
+```
+
+To skip all confirmation prompts:
+
+```powershell
+.\install.ps1 -Yes
+```
+
+To uninstall, download `install.ps1` and run:
+
+```powershell
+.\install.ps1 -Uninstall
+```
 
 ### Managing Vaults
 

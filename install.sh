@@ -71,8 +71,7 @@ write_state_file() {
 OS="$(uname -s 2>/dev/null || echo "Unknown")"
 case "$OS" in
 MINGW* | CYGWIN* | MSYS*)
-  echo "Windows detected. A PowerShell installer (install.ps1) is planned."
-  echo "See the README for manual install instructions."
+  echo "Windows detected. Use install.ps1 instead. See the README for instructions."
   exit 1
   ;;
 Linux)
