@@ -4,7 +4,7 @@ Cross-platform CLI for managing AI skills, commands, agents, and other ***Artifa
 
 ### Philosophy
 - 💻 All you need is a **terminal**.
-- 🏠 **Local-first**. No network functionality at all.
+- 🏠 **Local-first**. No network functionality at all (aside from an optional update command).
 - 🧰 **Extensible**. Easily add support for your coding agent with a simple yaml configuration.
 - 📦 **Portable**. Cross-platform support (Linux/Mac/Win).
 - ✔️ **Simple**. Easy to install, easy to export your artifacts/configuration.
