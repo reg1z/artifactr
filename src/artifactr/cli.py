@@ -296,6 +296,9 @@ def create_parser() -> ArtArgumentParser:
             "\n"
             "Discovery:\n"
             "  spelunk  (sp)   Discover artifacts in a directory, vault, or global config\n"
+            "\n"
+            "Maintenance:\n"
+            "  update          Upgrade artifactr to the latest version from PyPI\n"
         ),
         formatter_class=ArtHelpFormatter,
     )
@@ -1353,6 +1356,23 @@ def create_parser() -> ArtArgumentParser:
     create_skill_parser.add_argument(
         "--tools",
         help="Comma-separated tool list (used with --here)",
+    )
+
+    update_parser = subparsers.add_parser(
+        "update", aliases=["upgrade"],
+        **make_help(
+            summary="Upgrade artifactr to the latest version from PyPI.",
+            aliases=["upgrade"],
+            notes="Detects your install method (pipx, venv, or pip) and runs the appropriate upgrade command.",
+        ),
+    )
+    update_parser.add_argument(
+        "-y", "--yes", action="store_true",
+        help="Skip confirmation prompts",
+    )
+    update_parser.add_argument(
+        "--check", action="store_true",
+        help="Check for updates without upgrading",
     )
 
     return parser
@@ -5036,6 +5056,80 @@ def handle_create_skill(args: argparse.Namespace) -> int:
     return handle_create_artifact(args, "skill")
 
 
+def handle_update(args: argparse.Namespace) -> int:
+    """Handle the art update / art upgrade command."""
+    from .updater import (
+        check_and_repair_path,
+        detect_install_method,
+        get_current_version,
+        get_installed_version_from_pip,
+        get_latest_pypi_version,
+        run_upgrade,
+    )
+
+    yes: bool = getattr(args, "yes", False)
+    check_only: bool = getattr(args, "check", False)
+
+    # Detect install method
+    install_method = detect_install_method()
+
+    if install_method == "editable":
+        print("artifactr is installed in editable (development) mode.")
+        print("Manage upgrades manually via 'git pull' or 'pip install -e .'")
+        return 1
+
+    if install_method == "unknown":
+        print("Warning: Could not confirm install method. Proceeding with pip upgrade.")
+
+    # Get current version
+    current_version = get_current_version()
+
+    # Query PyPI
+    try:
+        latest_version = get_latest_pypi_version()
+    except RuntimeError as e:
+        print(f"Error: {e}")
+        return 1
+
+    # Already up to date?
+    if current_version == latest_version:
+        print(f"artifactr {current_version} is already up to date.")
+        return 0
+
+    # Show available version
+    print(f"artifactr {current_version} → {latest_version} available")
+
+    if check_only:
+        return 0
+
+    # Confirm upgrade
+    if not yes:
+        answer = input("Upgrade? [y/N] ").strip()
+        if answer.lower() != "y":
+            print("Upgrade cancelled.")
+            return 0
+
+    # Run upgrade
+    result = run_upgrade(install_method)
+    if result.returncode != 0:
+        print(f"Upgrade failed (exit code {result.returncode}).")
+        return 1
+
+    # Verify new version via pip show
+    new_version = get_installed_version_from_pip()
+    if new_version == latest_version:
+        print(f"artifactr upgraded to {new_version}.")
+    elif new_version:
+        print(f"artifactr is now at version {new_version}.")
+    else:
+        print("Upgrade completed (could not verify version).")
+
+    # PATH repair
+    check_and_repair_path(install_method, yes=yes)
+
+    return 0
+
+
 def main() -> int:
     """Main entry point for the CLI."""
     try:
@@ -5186,6 +5280,9 @@ def _main() -> int:
             return handle_create_artifact(args, "command")
         if args.create_command in ("agent", "a", "agt", "ag"):
             return handle_create_artifact(args, "agent")
+
+    if args.command in ("update", "upgrade"):
+        return handle_update(args)
 
     return 0
 

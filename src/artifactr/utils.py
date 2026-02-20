@@ -33,6 +33,30 @@ def get_config_dir() -> Path:
         return Path.home() / ".config" / "artifactr"
 
 
+def get_data_dir() -> Path:
+    """Return the platform-appropriate data directory for Artifactr.
+
+    Returns:
+        Path: Data directory path
+            - Linux: ~/.local/share/artifactr/
+            - macOS: ~/Library/Application Support/artifactr/
+            - Windows: %APPDATA%/artifactr/
+    """
+    system = platform.system()
+
+    if system == "Windows":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / "artifactr"
+        return Path.home() / "AppData" / "Roaming" / "artifactr"
+
+    elif system == "Darwin":  # macOS
+        return Path.home() / "Library" / "Application Support" / "artifactr"
+
+    else:  # Linux and others
+        return Path.home() / ".local" / "share" / "artifactr"
+
+
 def get_editor() -> str | None:
     """Return the user's preferred editor.
 

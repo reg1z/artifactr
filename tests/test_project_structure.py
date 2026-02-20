@@ -8,7 +8,7 @@ def test_package_importable():
     """Verify artifactr package can be imported."""
     import artifactr
     assert hasattr(artifactr, "__version__")
-    assert artifactr.__version__ == "0.2.1"
+    assert artifactr.__version__ == "0.3.3"
 
 
 def test_tools_subpackage_importable():
