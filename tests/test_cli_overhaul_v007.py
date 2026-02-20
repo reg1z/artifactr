@@ -1274,7 +1274,8 @@ class TestHandleConfList:
 class TestHandleSpelunk:
     """Tests for handle_spelunk."""
 
-    def test_no_target_defaults_to_global(self, capsys):
+    def test_no_target_defaults_to_cwd(self, tmp_path, capsys):
+        """With no target and no --global flag, spelunk defaults to CWD (not global config)."""
         args = argparse.Namespace(
             target=None,
             global_spelunk=False,
@@ -1282,16 +1283,22 @@ class TestHandleSpelunk:
             skills=None,
             commands=None,
             agents=None,
+            verbose=False,
+            depth=2,
+            format="human",
         )
-        with mock.patch(
-            "artifactr.cli.discover_global_artifacts", return_value=[]
-        ) as mock_discover:
+        with mock.patch("pathlib.Path.cwd", return_value=tmp_path), \
+             mock.patch("artifactr.cli.discover_global_artifacts") as mock_global, \
+             mock.patch("artifactr.cli.is_vault", return_value=False), \
+             mock.patch("artifactr.cli.discover_artifacts", return_value=[]), \
+             mock.patch("artifactr.cli.discover_artifacts_by_structure", return_value=[]), \
+             mock.patch("artifactr.cli.load_import_cache", return_value={}):
             rc = handle_spelunk(args)
 
         assert rc == 0
-        mock_discover.assert_called_once_with(tools_filter=None)
+        mock_global.assert_not_called()
         out = capsys.readouterr().out
-        assert "global config" in out.lower()
+        assert "global config" not in out.lower()
 
     def test_explicit_global_flag(self, capsys):
         args = argparse.Namespace(
@@ -1491,6 +1498,31 @@ class TestHandleSpelunk:
         assert "Location" in out
         assert "Source" not in out
         assert "Path" not in out
+
+    def test_no_target_spelunks_cwd_artifacts(self, tmp_path, capsys):
+        """art spelunk with no args discovers artifacts in CWD."""
+        skill_dir = tmp_path / "skills" / "my-cwd-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("---\nname: my-cwd-skill\ndescription: A skill\n---\n")
+
+        args = argparse.Namespace(
+            target=None,
+            global_spelunk=False,
+            tools=None,
+            skills=None,
+            commands=None,
+            agents=None,
+            verbose=False,
+            depth=2,
+            format="human",
+        )
+        with mock.patch("pathlib.Path.cwd", return_value=tmp_path), \
+             mock.patch("artifactr.cli.load_import_cache", return_value={}):
+            rc = handle_spelunk(args)
+
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "my-cwd-skill" in out
 
 
 # ---------------------------------------------------------------------------
@@ -2233,3 +2265,76 @@ class TestConfigEdit:
             rc = main()
         assert rc == 0
         mock_handler.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# CLI QoL Updates: create slash syntax + -V flag
+# ---------------------------------------------------------------------------
+
+
+class TestCreateSlashSyntax:
+    """Tests for art create type/name slash syntax."""
+
+    def test_create_skill_slash(self):
+        from artifactr.cli import _main
+        with mock.patch("sys.argv", ["art", "create", "skill/my-skill"]), \
+             mock.patch("artifactr.cli.handle_create_skill", return_value=0) as mock_create:
+            rc = _main()
+        assert rc == 0
+        mock_create.assert_called_once()
+        ns = mock_create.call_args[0][0]
+        assert ns.create_command == "skill"
+        assert ns.skill_name == "my-skill"
+
+    def test_create_cmd_slash(self):
+        from artifactr.cli import _main
+        with mock.patch("sys.argv", ["art", "create", "cmd/my-cmd"]), \
+             mock.patch("artifactr.cli.handle_create_artifact", return_value=0) as mock_create:
+            rc = _main()
+        assert rc == 0
+        mock_create.assert_called_once()
+        ns, artifact_type = mock_create.call_args[0]
+        assert ns.create_command == "cmd"
+        assert ns.command_name == "my-cmd"
+        assert artifact_type == "command"
+
+    def test_create_agt_slash(self):
+        from artifactr.cli import _main
+        with mock.patch("sys.argv", ["art", "create", "agt/my-agent"]), \
+             mock.patch("artifactr.cli.handle_create_artifact", return_value=0) as mock_create:
+            rc = _main()
+        assert rc == 0
+        mock_create.assert_called_once()
+        ns, artifact_type = mock_create.call_args[0]
+        assert ns.create_command == "agt"
+        assert ns.agent_name == "my-agent"
+        assert artifact_type == "agent"
+
+    def test_create_cr_alias_slash(self):
+        """cr alias also works with slash syntax."""
+        from artifactr.cli import _main
+        with mock.patch("sys.argv", ["art", "cr", "skill/test-skill"]), \
+             mock.patch("artifactr.cli.handle_create_skill", return_value=0) as mock_create:
+            rc = _main()
+        assert rc == 0
+        ns = mock_create.call_args[0][0]
+        assert ns.create_command == "skill"
+        assert ns.skill_name == "test-skill"
+
+    def test_create_invalid_slash_type_falls_through(self):
+        """Unknown type before slash does not pre-process and lets argparse error."""
+        from artifactr.cli import _main
+        with mock.patch("sys.argv", ["art", "create", "unknown/name"]):
+            with pytest.raises(SystemExit):
+                _main()
+
+
+class TestVersionFlag:
+    """Test for art -V short version flag."""
+
+    def test_version_short_flag(self, capsys):
+        from artifactr.cli import create_parser
+        parser = create_parser()
+        with pytest.raises(SystemExit) as exc_info:
+            parser.parse_args(["-V"])
+        assert exc_info.value.code == 0

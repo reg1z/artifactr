@@ -273,7 +273,7 @@ def create_parser() -> ArtArgumentParser:
             "Commands target the active vault/tool by default (see: art vault select, art tool select)."
         ),
         epilog=(
-            "Vault Operations:\n"
+            "Artifact Operations:\n"
             "  ls              List artifacts in a vault (or files within an artifact)\n"
             "  rm              Remove artifacts from a vault\n"
             "  copy     (cp)   Copy artifacts within or across vaults\n"
@@ -300,7 +300,7 @@ def create_parser() -> ArtArgumentParser:
         formatter_class=ArtHelpFormatter,
     )
     parser.add_argument(
-        "--version", action="version", version=f"%(prog)s {__version__}"
+        "-V", "--version", action="version", version=f"%(prog)s {__version__}"
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands", parser_class=ArtArgumentParser)
@@ -3993,7 +3993,7 @@ def _compute_spelunk_location(artifact_path: Path, original_target: Path | None,
     For directory/vault spelunk, returns path relative to original_target.
     Falls back to absolute path if relative_to() fails (e.g. symlink outside root).
     """
-    if global_spelunk or original_target is None:
+    if global_spelunk:
         home = Path.home()
         try:
             rel = artifact_path.relative_to(home)
@@ -4001,6 +4001,8 @@ def _compute_spelunk_location(artifact_path: Path, original_target: Path | None,
         except ValueError:
             return str(artifact_path)
     else:
+        if original_target is None:
+            return str(artifact_path)
         try:
             return str(artifact_path.relative_to(original_target))
         except ValueError:
@@ -4067,14 +4069,10 @@ def handle_spelunk(args: argparse.Namespace) -> int:
     # Track the original target for LOCATION column relativization
     original_target: Path | None = None
 
-    if target_str is None or global_spelunk:
-        # Global config spelunk
-        if target_str is None and not global_spelunk and output_format == "human":
-            print("No target specified — spelunking global config directories.\n")
+    if global_spelunk:
         artifacts = discover_global_artifacts(tools_filter=tools_filter)
-        global_spelunk = True
     else:
-        target = Path(target_str).resolve()
+        target = Path(target_str).resolve() if target_str else Path.cwd()
         original_target = target
         if not target.exists() or not target.is_dir():
             print(f"Error: Target directory does not exist: {target_str}", file=sys.stderr)
@@ -4094,7 +4092,7 @@ def handle_spelunk(args: argparse.Namespace) -> int:
         artifacts = _apply_type_filters(artifacts, type_filters)
 
     if not artifacts:
-        label = target_str or "global config"
+        label = "global config" if global_spelunk else (target_str or str(original_target))
         if output_format == "json":
             print("[]")
         elif output_format == "yaml":
@@ -4118,8 +4116,8 @@ def handle_spelunk(args: argparse.Namespace) -> int:
 
     # Human format
     import_cache: dict[str, list[str]] = {}
-    if target_str and not global_spelunk:
-        import_cache = load_import_cache(original_target or Path(target_str).resolve())
+    if not global_spelunk:
+        import_cache = load_import_cache(original_target)
 
     rows = []
     for art in artifacts:
@@ -5050,7 +5048,12 @@ def main() -> int:
 def _main() -> int:
     """Internal main dispatch."""
     parser = create_parser()
-    args = parser.parse_args()
+    argv = sys.argv[1:]
+    if len(argv) >= 2 and argv[0] in ("create", "cr") and "/" in argv[1]:
+        type_part, _, name_part = argv[1].partition("/")
+        if type_part in _TYPE_ALIASES and name_part:
+            argv = [argv[0], type_part, name_part] + argv[2:]
+    args = parser.parse_args(argv)
 
     if args.command is None:
         parser.print_help()
