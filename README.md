@@ -3,12 +3,13 @@
 Cross-platform CLI for managing AI skills, commands, agents, and other ***Artifacts***. Maintain a library in centralized ***Vaults*** and import them into any project or tool config for use with AI coding assistants.
 
 ### Philosophy
-- All you need is a **terminal**.
-- **Local-first**. No network functionality at all.
-- **Extensible**. Easily add support for your coding agent with a simple yaml configuration.
-- **Portable**. Cross-platform support (Linux/Mac/Win).
-- **Simple**. Easy to install, easy to export your artifacts/configuration.
-- **Conventional**. Command syntax attempts to feel familiar by aligning with existing conventions.
+- 💻 All you need is a **terminal**.
+- 🏠 **Local-first**. No network functionality at all.
+- 🧰 **Extensible**. Easily add support for your coding agent with a simple yaml configuration.
+- 📦 **Portable**. Cross-platform support (Linux/Mac/Win).
+- ✔️ **Simple**. Easy to install, easy to export your artifacts/configuration.
+- 🧠 **Conventional**. Command syntax attempts to feel familiar by aligning with existing conventions.
+- 🤖 **Scriptable**. Every action automatable.
 
 [Installation](#installation) •
 [Quickstart](#quickstart) •
