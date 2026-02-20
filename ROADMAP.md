@@ -8,6 +8,9 @@ Stuff under "Planned" will definitely be shipped.
 ### Documentation
 - Add better documentation apart from the README.
 
+### artifactr skills
+- Importable skill files that ship with the tool that provide coding agents with context of how and where to create skills/artifacts with `artifactr` in mind.
+
 ### Backups
 - Backup format for:
   - Vault Catalog
