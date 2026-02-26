@@ -54,6 +54,8 @@ Not all agentic tools support the same artifact types. And there are frequently 
 
 #### Converting an artifact between types
 
+### OpenCode-specific
+- Option to add corresponding minimal command(s) for imported skills
 
 ### Recursive AGENTS.md linking
 - Automate symbolic linking of AGENTS.md throughout an entire project for coding agent tools that do not support it.
