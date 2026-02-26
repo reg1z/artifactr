@@ -1,5 +1,6 @@
 ---
-description: Create a new Artifactr skill.
+description: Create new skill with Artifactr
+version: 0.1
 ---
 
-Run `art create skill/<name>` to create a skill in the default vault. Use `-v <vault>` to target a specific vault, `--edit` to open in editor immediately.
+Use skill art-create-skill to make a new skill

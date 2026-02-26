@@ -1,6 +1,6 @@
 ---
-description: How to create a new Artifactr command using `art create command/<name>`.
-version: 0.1
+description: How to create a new Artifactr command using `art cr c <name>`.
+version: 0.2
 ---
 
 # Creating Commands with Artifactr
@@ -10,41 +10,50 @@ A **command** is a flat `.md` file artifact stored in `commands/<name>.md` insid
 ## Basic Usage
 
 ```sh
-art create command/<name>
-art create command <name>      # equivalent
-art create cmd/<name>          # alias: cmd
-art create c/<name>            # alias: c
+art cr c <name> -d 'description text'
 ```
 
-All forms are equivalent — the slash syntax is a convenient shorthand.
+The `-d` flag (description) is required. Slash syntax is also supported: `art cr c/<name>`.
+
+### Command & Type Aliases
+
+| Full | Shortest |
+|---|---|
+| `art create command` | `art cr c` |
 
 ## Examples
 
 ```sh
-art create command/run-tests          # create in default vault
-art create cmd/run-tests -v work      # create in vault named "work"
-art create command/run-tests --edit   # open in editor after creating
+art cr c run-tests -d 'Run the test suite'
+art cr c run-tests -d 'Run tests' -V work                # target vault "work"
+art cr c run-tests -d 'Run tests' -c 'Execute pytest...' # with body content
+art cr c run-tests -d 'Local cmd' -H                     # create in CWD project, not vault
+art cr c run-tests -d 'Run tests' -D version=1.0 -D author=Jo         # create with additional frontmatter field(s)
+art cr c run-tests -d 'Run tests' --tools claude-code,opencode         # create in tool(s) config
 ```
 
 ## Flags
 
 | Flag | Description |
 |---|---|
-| `-v`, `--vault` | Target vault (name or path). Defaults to the configured default vault. |
-| `-e`, `--edit` | Open the new artifact in `$EDITOR` immediately after creation. |
-| `-t`, `--tool` | Tool context (e.g., `claude-code`, `opencode`). |
+| `-d`, `--description` | **Required.** Command description (populates frontmatter `description:`). |
+| `-c`, `--content` | Markdown body content placed after the frontmatter block. |
+| `-D`, `--field` | Additional frontmatter field as `key=value`. Repeatable. |
+| `-V`, `--vault` | Target vault (name or path). Comma-separated or repeatable. Defaults to the configured default vault. |
+| `-H`, `--here` | Create in the current project directory instead of in a vault. |
+| `--tools` | Comma-separated tool list (used with `-H`). |
 
 ## What Gets Created
 
 ```
-<vault>/commands/<name>.md    # the command content file; edit this with your instructions
+<vault>/commands/<name>.md    # the command content file
 ```
 
-The file is pre-populated with a minimal YAML frontmatter block:
+The file is pre-populated with YAML frontmatter:
 
 ```markdown
 ---
-description: ""
+description: "your description"
 ---
 
 Your command instructions here.
@@ -52,10 +61,4 @@ Your command instructions here.
 
 ## Slash Syntax
 
-The slash syntax (`art create command/<name>`) is consistent across `create`, `edit`, `cat`, `inspect`, `export`, and `ls` subcommands.
-
-## See Also
-
-- `art edit command/<name>` — open an existing command in `$EDITOR`
-- `art create skill/<name>` — create a skill (directory-based artifact)
-- `art proj import` — import commands from vault into the current project
+Slash syntax (`art cr c/<name>`) is consistent across `cr`, `ed`, `cat`, `inspect`, `export`, and `ls`.

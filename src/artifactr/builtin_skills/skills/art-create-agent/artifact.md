@@ -1,6 +1,6 @@
 ---
-description: How to create a new Artifactr agent using `art create agent/<name>`.
-version: 0.1
+description: How to create a new Artifactr agent using `art cr a <name>`.
+version: 0.2
 ---
 
 # Creating Agents with Artifactr
@@ -10,41 +10,52 @@ An **agent** is a flat `.md` file artifact stored in `agents/<name>.md` inside a
 ## Basic Usage
 
 ```sh
-art create agent/<name>
-art create agent <name>        # equivalent
-art create agt/<name>          # alias: agt
-art create a/<name>            # alias: a
+art cr a <name> -d 'description text'
 ```
 
-All forms are equivalent — the slash syntax is a convenient shorthand.
+The `-d` flag (description) is required. Slash syntax is also supported: `art cr a/<name>`.
+
+### Command & Type Aliases
+
+| Full | Shortest |
+|---|---|
+| `art create agent` | `art cr a` |
 
 ## Examples
 
 ```sh
-art create agent/code-reviewer          # create in default vault
-art create agt/code-reviewer -v work    # create in vault named "work"
-art create agent/code-reviewer --edit   # open in editor after creating
+art cr a code-reviewer -d 'Reviews pull requests'
+art cr a code-reviewer -d 'PR reviewer' -V work                    # target vault "work"
+art cr a code-reviewer -d 'Reviewer' -c 'You review code…'         # with body content
+art cr a code-reviewer -d 'Reviewer' -n 'Code Reviewer'            # custom display name
+art cr a code-reviewer -d 'Local agent' -H                         # create in CWD project, not vault
+art cr a code-reviewer -d 'Reviewer' -D version=1.0 -D author=Jo   # create with additional frontmatter field(s)
+art cr a code-reviewer -d 'Reviewer' --tools claude-code,opencode  # create in tool(s) config
 ```
 
 ## Flags
 
 | Flag | Description |
 |---|---|
-| `-v`, `--vault` | Target vault (name or path). Defaults to the configured default vault. |
-| `-e`, `--edit` | Open the new artifact in `$EDITOR` immediately after creation. |
-| `-t`, `--tool` | Tool context (e.g., `claude-code`, `opencode`). |
+| `-d`, `--description` | **Required.** Agent description (populates frontmatter `description:`). |
+| `-c`, `--content` | Markdown body content placed after the frontmatter block. |
+| `-n`, `--name` | Override the frontmatter display name (defaults to the identifier). |
+| `-D`, `--field` | Additional frontmatter field as `key=value`. Repeatable. |
+| `-V`, `--vault` | Target vault (name or path). Comma-separated or repeatable. Defaults to the configured default vault. |
+| `-H`, `--here` | Create in the current project directory instead of in a vault. |
+| `--tools` | Comma-separated tool list (used with `-H`). |
 
 ## What Gets Created
 
 ```
-<vault>/agents/<name>.md    # the agent content file; edit this with your instructions
+<vault>/agents/<name>.md    # the agent content file
 ```
 
-The file is pre-populated with a minimal YAML frontmatter block:
+The file is pre-populated with YAML frontmatter:
 
-```markdown
+```md
 ---
-description: ""
+description: "your description"
 ---
 
 Your agent instructions here.
@@ -52,10 +63,4 @@ Your agent instructions here.
 
 ## Slash Syntax
 
-The slash syntax (`art create agent/<name>`) is consistent across `create`, `edit`, `cat`, `inspect`, `export`, and `ls` subcommands.
-
-## See Also
-
-- `art edit agent/<name>` — open an existing agent in `$EDITOR`
-- `art create skill/<name>` — create a skill (directory-based artifact)
-- `art proj import` — import agents from vault into the current project
+Slash syntax (`art cr a/<name>`) is consistent across `cr`, `ed`, `cat`, `inspect`, `export`, and `ls`.

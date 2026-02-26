@@ -18,14 +18,14 @@ Artifactr (`art`) is a local-first CLI tool for managing AI coding agent artifac
 ## config.yaml Fields
 
 ```yaml
-vaults:                    # list of absolute paths to registered vault directories
+vaults:                              # list of absolute paths to registered vault directories
   - /home/user/my-vault
 default_vault: /home/user/my-vault   # absolute path to the currently selected vault (null if unset)
-default_tool: claude-code  # which tool's directory layout to use by default
-vault_names:               # mapping of vault path → human name
+default_tool: claude-code            # which tool's directory layout to use by default
+vault_names:                         # mapping of vault path → human name
   /home/user/my-vault: personal
-tools: {}                  # custom tool definitions (overrides built-ins per tool name)
-nav_mode: null             # optional navigation mode setting
+tools: {}                            # custom tool definitions (overrides built-ins per tool name)
+nav_mode: null                       # optional navigation mode setting
 ```
 
 ## Finding the Default Vault
@@ -61,7 +61,7 @@ tools: {}          # optional per-vault tool overrides (same format as global to
 | **command** | Single `.md` file | `commands/<name>.md` |
 | **agent** | Single `.md` file | `agents/<name>.md` |
 
-Skills use a directory-per-skill layout because Claude Code and OpenCode expect that format. Commands and agents are flat markdown files.
+Skills use a directory-per-skill layout because most popular coding agent tools (eg Claude Code,OpenCode) expect this format. Commands and agents are flat markdown files.
 
 ## Three-Tier Tool Resolution
 
