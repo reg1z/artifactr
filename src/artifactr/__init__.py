@@ -1,3 +1,3 @@
 """Artifactr - CLI tool for managing AI project artifacts."""
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"

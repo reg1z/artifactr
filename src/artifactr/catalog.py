@@ -7,6 +7,7 @@ import fnmatch
 import re
 import shutil
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -700,5 +701,214 @@ def import_vaults_from_zip(
         "extracted": extracted,
         "errors": errors,
         "dest": str(dest),
+        "error": None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Backup and restore
+# ---------------------------------------------------------------------------
+
+def backup_catalog(output_path: str) -> dict[str, Any]:
+    """Create a backup archive of all registered vaults plus a config snapshot.
+
+    Args:
+        output_path: Path for the output .zip file.
+
+    Returns:
+        Result dict with keys:
+            - success: bool
+            - output: str output path (if success)
+            - vault_count: int number of vaults backed up
+            - error: str | None
+    """
+    out = Path(output_path)
+    if out.exists():
+        return {"success": False, "output": None, "vault_count": 0, "error": f"Output file already exists: {output_path}"}
+
+    config = load_config()
+    vault_paths = config["vaults"]
+    vault_names = [config["vault_names"].get(p, Path(p).name) for p in vault_paths]
+
+    # Determine default_vault_name (name, not path)
+    default_vault = config.get("default_vault")
+    default_vault_name: str | None = None
+    if default_vault and default_vault in config["vault_names"]:
+        default_vault_name = config["vault_names"][default_vault]
+    elif default_vault:
+        default_vault_name = Path(default_vault).name
+
+    created_at = datetime.now(timezone.utc).isoformat()
+
+    manifest_entries = []
+
+    with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for vault_path, vault_name in zip(vault_paths, vault_names):
+            dir_name = vault_name
+            manifest_entries.append({"name": vault_name, "dir": dir_name})
+            vault_dir = Path(vault_path)
+
+            for item_name in (*_VAULT_ARTIFACT_DIRS, "vault.yaml"):
+                item = vault_dir / item_name
+                if item.is_dir():
+                    for file in item.rglob("*"):
+                        if file.is_file():
+                            arcname = f"{dir_name}/{item_name}/{file.relative_to(item)}"
+                            zf.write(file, arcname)
+                elif item.is_file():
+                    zf.write(item, f"{dir_name}/{item_name}")
+
+        # Write manifest.yaml
+        manifest_data = {
+            "format_version": 1,
+            "created_at": created_at,
+            "vaults": manifest_entries,
+        }
+        zf.writestr("manifest.yaml", yaml.dump(manifest_data, default_flow_style=False))
+
+        # Write config_snapshot.yaml
+        snapshot = {
+            "format_version": 1,
+            "created_at": created_at,
+            "default_vault_name": default_vault_name,
+            "default_tool": config.get("default_tool"),
+            "nav_mode": config.get("nav_mode"),
+            "tools": config.get("tools", {}),
+        }
+        zf.writestr("config_snapshot.yaml", yaml.dump(snapshot, default_flow_style=False))
+
+    return {"success": True, "output": str(out), "vault_count": len(vault_paths), "error": None}
+
+
+def restore_catalog(archive_path: str) -> dict[str, Any]:
+    """Restore vaults from a backup archive and apply config settings.
+
+    Vaults are always extracted to ~/.config/artifactr/vaults/<vault-name>/.
+    Name conflicts are resolved by appending -1, -2, etc.
+
+    Args:
+        archive_path: Path to the backup .zip archive.
+
+    Returns:
+        Result dict with keys:
+            - success: bool
+            - extracted: list[dict] with name, path for each vault
+            - renames: dict mapping original name → assigned name
+            - warnings: list[str]
+            - errors: list[str]
+            - error: str | None (fatal errors only)
+    """
+    from .config import get_config_dir
+
+    arc = Path(archive_path)
+    if not arc.exists() or not arc.is_file():
+        return {"success": False, "extracted": [], "renames": {}, "warnings": [], "errors": [], "error": f"Archive not found: {archive_path}"}
+
+    try:
+        if not zipfile.is_zipfile(arc):
+            return {"success": False, "extracted": [], "renames": {}, "warnings": [], "errors": [], "error": f"Not a valid zip archive: {archive_path}"}
+    except OSError as e:
+        return {"success": False, "extracted": [], "renames": {}, "warnings": [], "errors": [], "error": str(e)}
+
+    with zipfile.ZipFile(arc, "r") as zf:
+        names_in_zip = zf.namelist()
+        if "manifest.yaml" not in names_in_zip:
+            return {"success": False, "extracted": [], "renames": {}, "warnings": [], "errors": [], "error": "Archive does not contain manifest.yaml"}
+        if "config_snapshot.yaml" not in names_in_zip:
+            return {"success": False, "extracted": [], "renames": {}, "warnings": [], "errors": [], "error": "Archive does not contain config_snapshot.yaml"}
+
+        manifest_data = yaml.safe_load(zf.read("manifest.yaml").decode("utf-8"))
+        snapshot = yaml.safe_load(zf.read("config_snapshot.yaml").decode("utf-8"))
+
+    if not manifest_data or "vaults" not in manifest_data:
+        return {"success": False, "extracted": [], "renames": {}, "warnings": [], "errors": [], "error": "manifest.yaml is invalid or missing 'vaults' key"}
+
+    dest_base = get_config_dir() / "vaults"
+    dest_base.mkdir(parents=True, exist_ok=True)
+
+    extracted: list[dict[str, Any]] = []
+    renames: dict[str, str] = {}
+    warnings: list[str] = []
+    errors: list[str] = []
+
+    config = load_config()
+    existing_names = set(config["vault_names"].values())
+
+    def _unique_name(name: str) -> str:
+        candidate = name
+        suffix = 1
+        while candidate in existing_names:
+            candidate = f"{name}-{suffix}"
+            suffix += 1
+        return candidate
+
+    with zipfile.ZipFile(arc, "r") as zf:
+        for entry in manifest_data["vaults"]:
+            vault_name = entry.get("name")
+            vault_dir_name = entry.get("dir", vault_name)
+
+            assigned_name = _unique_name(vault_name)
+            if assigned_name != vault_name:
+                renames[vault_name] = assigned_name
+
+            vault_dest = dest_base / assigned_name
+            existing_names.add(assigned_name)
+
+            # Extract vault files
+            prefix = f"{vault_dir_name}/"
+            for member in zf.infolist():
+                if member.filename.startswith(prefix):
+                    rel = member.filename[len(prefix):]
+                    if not rel:
+                        continue
+                    target = vault_dest / rel
+                    if member.filename.endswith("/"):
+                        target.mkdir(parents=True, exist_ok=True)
+                    else:
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_bytes(zf.read(member.filename))
+
+            # Register vault
+            reg = add_vaults([str(vault_dest)], name=assigned_name)
+            if reg["errors"]:
+                errors.extend(reg["errors"])
+            else:
+                extracted.append({"name": assigned_name, "path": str(vault_dest)})
+
+    # Apply config settings from snapshot
+    config = load_config()
+    if snapshot:
+        if "default_tool" in snapshot and snapshot["default_tool"] is not None:
+            config["default_tool"] = snapshot["default_tool"]
+        if "nav_mode" in snapshot:
+            config["nav_mode"] = snapshot["nav_mode"]
+        if "tools" in snapshot and snapshot["tools"]:
+            config["tools"].update(snapshot["tools"])
+
+        # Set default vault
+        default_vault_name = snapshot.get("default_vault_name")
+        if default_vault_name is not None:
+            # Find the extracted vault (accounting for renames)
+            target_name = renames.get(default_vault_name, default_vault_name)
+            found_path = None
+            for entry in extracted:
+                if entry["name"] == target_name:
+                    found_path = entry["path"]
+                    break
+            if found_path:
+                config["default_vault"] = found_path
+            else:
+                warnings.append(
+                    f"default_vault_name '{default_vault_name}' not found in archive; default vault unchanged."
+                )
+
+        save_config(config)
+
+    return {
+        "success": True,
+        "extracted": extracted,
+        "renames": renames,
+        "warnings": warnings,
+        "errors": errors,
         "error": None,
     }

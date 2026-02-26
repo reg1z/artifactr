@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Artifactr** is a local-first CLI tool (`art`) for managing AI coding agent artifacts (skills, commands, agents) across projects. Users store artifacts in named **vaults**, then import them into any project as copies or symlinks. No network connections; PyYAML is the only external dependency.
+**Artifactr** is a local-first CLI tool (`art`) for managing AI coding agent artifacts (skills, commands, agents) across projects. Users store artifacts in named **vaults**, then import them into any project as copies or symlinks. PyYAML is the only external dependency (`art update` makes a single outbound PyPI request).
 
 ## Tech Stack
 
@@ -10,7 +10,7 @@
 - **CLI framework**: `argparse` (stdlib only)
 - **YAML**: PyYAML >= 6.0
 - **Build**: `setuptools` via `pyproject.toml`
-- **Tests**: `pytest` (362 tests in `tests/`)
+- **Tests**: `pytest` (566 tests in `tests/`)
 - **Entry point**: `art` → `artifactr.cli:main`
 - **Dev install**: `pip install -e .` (`.venv/` with Python 3.14)
 
@@ -23,25 +23,25 @@ art --help                    # CLI reference
 python -m build               # build wheel + sdist
 ```
 
-One known failing test: `test_project_structure.py::test_package_importable` has a stale `__version__ == "0.1.0"` assertion (package is now `0.2.0`).
-
 ## Directory Structure
 
 ```
 src/artifactr/
-  cli.py          # All CLI logic: handle_* functions, main(), _main() ~3270 lines
+  __main__.py     # Enables `python -m artifactr`; delegates to cli.main()
+  cli.py          # All CLI logic: handle_* functions, main(), _main() ~5290 lines
   catalog.py      # Vault CRUD: add/remove/init/select/rename/list
   config.py       # Read/write ~/.config/artifactr/config.yaml and vault.yaml
   creator.py      # Artifact creation, edit-target resolution
   importer.py     # Copy/symlink artifacts, .art-cache management, link/unlink
   scanner.py      # Artifact discovery across dirs/vaults/global config paths
-  utils.py        # Cross-platform config dir, editor resolution, git detection
+  updater.py      # Self-update logic: install detection, PyPI check, upgrade, PATH repair
+  utils.py        # Cross-platform config/data dir, editor resolution, git detection
   known_fields.py # Registry of YAML frontmatter fields (KnownField dataclass)
   tools/
     __init__.py   # BUILTIN_TOOLS dict, tool registry, GenericToolAdapter factory
     base.py       # GenericToolAdapter class
 
-tests/            # 14 test files, ~362 tests
+tests/            # 18 test files, ~566 tests
 openspec/         # Spec-driven dev artifacts (specs/ and changes/)
 art/              # The project's own vault (dogfooding)
 dist/             # Built wheels and sdists
@@ -88,6 +88,7 @@ Supports both legacy (no headers) and v2 format via `_parse_cache_file()`.
 ## Configuration
 
 - **Global config**: `~/.config/artifactr/config.yaml` (Linux/XDG), `~/Library/Application Support/artifactr/config.yaml` (macOS), `%APPDATA%/artifactr/config.yaml` (Windows). `get_config_dir()` in `utils.py` handles all three.
+- **Data dir** (install state): `~/.local/share/artifactr/` (Linux), same as config dir on macOS/Windows. `get_data_dir()` in `utils.py`. The managed venv and `.install-info` state file live here.
 - **Per-vault config**: `vault.yaml` in vault root — name + tool overrides travel with the vault.
 - **Project import cache**: `<project>/.art-cache/imported`
 - **Global import cache**: `~/.config/artifactr/.art-cache-global/imported`
@@ -96,7 +97,8 @@ Supports both legacy (no headers) and v2 format via `_parse_cache_file()`.
 ## Conventions
 
 - **Type hints on every function**.
-- **CLI aliases**: `-V`/`--vault` accepts comma-separated or repeated flags; extensive short aliases (`s`/`sk` skill, `c`/`cmd` command, `a`/`agt` agent; `cr` create, `ed` edit, `sp` spelunk, `st` store, `v` vault, `p`/`proj` project)
+- **CLI aliases**: Top-level `art -V`/`--version`; subcommand `-V`/`--vault` accepts comma-separated or repeated flags; extensive short aliases (`s`/`sk` skill, `c`/`cmd` command, `a`/`agt` agent; `cr` create, `ed` edit, `sp` spelunk, `st` store, `v` vault, `p`/`proj` project)
+- **Slash syntax for `create`**: `art create skill/my-skill` is equivalent to `art create skill my-skill`, consistent with `edit`, `cat`, `inspect`, `export`, and `ls`.
 - **Alias maintenance**: When adding, changing, or removing command aliases, both the argparse `aliases=` and the `make_help(aliases=...)` call must be updated. The `--help` output is the user-facing source of truth for discoverability.
 - **Windows symlink fallback**: `create_link()` falls back to hard links when symlinks fail (requires both files on same volume)
 - **Frontmatter name resolution**: All artifact name-matching commands MUST resolve names in this order: (1) exact filename/dirname match, (2) frontmatter `name:` field fallback. This convention applies project-wide — not just `art edit`. `_find_by_frontmatter_name()` and `_parse_frontmatter_name()` in `creator.py` are the canonical implementations.
@@ -122,6 +124,8 @@ Every `add_parser()` call uses `**make_help(...)` to produce consistent help out
 
 **Link** (`art proj link`): reads cache → finds vault source + project dest → replaces copy with symlink (backup on conflict) → updates cache `:linked` suffix.
 
-**Spelunk** (`art spelunk`): discovers artifacts in global dirs, vaults, or project dirs → annotates with import status → outputs as human/JSON/YAML/Markdown.
+**Spelunk** (`art spelunk`): defaults to CWD when no target is given; use `-g`/`--global` to spelunk global config dirs. Discovers artifacts → annotates with import status → outputs as human/JSON/YAML/Markdown.
 
 **Store** (`art store`): discovers artifacts in target dir → user selects → copies into vault's `skills/`/`commands/`/`agents/` subdirs.
+
+**Update** (`art update` / `art upgrade`): detects install method (editable, pipx, managed venv, unknown) → checks PyPI for latest version → confirms with user → runs upgrade subprocess → verifies result via `pip show` → optionally repairs PATH for venv installs.

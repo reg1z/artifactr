@@ -288,7 +288,7 @@ def create_parser() -> ArtArgumentParser:
             "  vault    (v)    Manage vaults (add, init, rm, name, select, ls, copy, export, import)\n"
             "  tool     (t)    Manage tools (select, ls, add, rm, info)\n"
             "  project  (p)    Project-side artifact operations (import, rm, wipe, ls, link, unlink)\n"
-            "  config   (c)    Tool-specific global configs & artifactr settings (import, rm, wipe, ls, link, unlink, edit)\n"
+            "  config   (c)    Tool-specific global configs & artifactr settings (import, rm, wipe, ls, link, unlink, edit, backup, restore)\n"
             "  shell           Shell integration utilities (setup)\n"
             "\n"
             "Navigation:\n"
@@ -299,6 +299,7 @@ def create_parser() -> ArtArgumentParser:
             "\n"
             "Maintenance:\n"
             "  update          Upgrade artifactr to the latest version from PyPI\n"
+            "  uns             Install built-in skill/command files into a project or globally\n"
         ),
         formatter_class=ArtHelpFormatter,
     )
@@ -919,7 +920,20 @@ def create_parser() -> ArtArgumentParser:
     )
     conf_subparsers = config_parser.add_subparsers(dest="conf_command", parser_class=ArtArgumentParser)
 
-    # conf edit (alphabetical: 1st)
+    # conf backup (alphabetical: 1st)
+    conf_backup = conf_subparsers.add_parser(
+        "backup", help="Backup all registered vaults to a zip archive",
+        **make_help(
+            summary="Zip all registered vault contents and a config snapshot into a portable archive.",
+            see_also=[("art config restore", "Restore vaults from a backup archive")],
+        ),
+    )
+    conf_backup.add_argument(
+        "output", nargs="?", default=None,
+        help="Output file path (default: artifactr-backup-YYYYMMDD.zip in CWD)",
+    )
+
+    # conf edit (alphabetical: 2nd)
     conf_subparsers.add_parser(
         "edit", aliases=["ed"], help="Open artifactr's global YAML config in editor",
         **make_help(
@@ -1052,6 +1066,19 @@ def create_parser() -> ArtArgumentParser:
         help="Skip confirmation prompt",
     )
     add_type_filter_args(conf_wipe)
+
+    # conf restore (alphabetical: after wipe)
+    conf_restore = conf_subparsers.add_parser(
+        "restore", help="Restore vaults from a backup archive",
+        **make_help(
+            summary="Extract vault contents from a backup archive and register all restored vaults.",
+            notes="Vaults are always extracted to ~/.config/artifactr/vaults/. Absolute paths from the original machine are not restored.",
+            see_also=[("art config backup", "Create a backup archive")],
+        ),
+    )
+    conf_restore.add_argument(
+        "archive", help="Path to the backup zip archive",
+    )
 
     # copy command (art copy / art cp)
     copy_parser = subparsers.add_parser(
@@ -1373,6 +1400,24 @@ def create_parser() -> ArtArgumentParser:
     update_parser.add_argument(
         "--check", action="store_true",
         help="Check for updates without upgrading",
+    )
+
+    # update-native-skills (art update-native-skills / art uns)
+    uns_parser = subparsers.add_parser(
+        "update-native-skills", aliases=["uns"],
+        **make_help(
+            summary="Install built-in skill and command files into the current project or global tool config dirs.",
+            aliases=["uns"],
+            notes="Skills are copied from the artifactr package; existing files are silently overwritten.",
+            see_also=[("art conf import", "Import vault artifacts into global tool config dirs")],
+        ),
+    )
+    uns_parser.add_argument(
+        "-g", "--global", dest="global_install", action="store_true",
+        help="Install into global tool config directories instead of CWD",
+    )
+    uns_parser.add_argument(
+        "--tools", help="Comma-separated list of tools to install into (default: configured default tool)",
     )
 
     return parser
@@ -5130,6 +5175,126 @@ def handle_update(args: argparse.Namespace) -> int:
     return 0
 
 
+def handle_update_native_skills(args: argparse.Namespace) -> int:
+    """Handle the art update-native-skills / art uns command."""
+    from .builtins import install_builtin_skills as _install_builtin_skills
+    from .utils import is_git_repo as _is_git_repo
+
+    global_install: bool = getattr(args, "global_install", False)
+
+    # Resolve tools list
+    tools_list: list[str]
+    if getattr(args, "tools", None):
+        tools_list = [t.strip() for t in args.tools.split(",")]
+    else:
+        tools_list = [get_default_tool()]
+
+    global_tools = load_global_tools()
+
+    # Git repo check for local install
+    if not global_install:
+        cwd = Path.cwd()
+        if not _is_git_repo(cwd):
+            try:
+                response = input(
+                    "Current directory is not a git repository. Install built-in skills here anyway? [Y/n]: "
+                )
+                if response.strip().lower() in ("n", "no"):
+                    print("Aborted.")
+                    return 1
+            except EOFError:
+                print("Aborted.")
+                return 1
+
+    any_failure = False
+    for tool_name in tools_list:
+        resolved = resolve_tool_name(tool_name, extra_tools=global_tools)
+        adapter = get_tool(resolved, global_tools=global_tools)
+        if adapter is None:
+            print(f"Error: Unknown tool: {tool_name}", file=sys.stderr)
+            any_failure = True
+            continue
+
+        if global_install:
+            if "skills" in adapter.supported_types:
+                target_skills = adapter.get_global_destination("skills")
+            else:
+                target_skills = None
+            if "commands" in adapter.supported_types:
+                target_commands: Path | None = adapter.get_global_destination("commands")
+            else:
+                target_commands = None
+        else:
+            cwd = Path.cwd()
+            if "skills" in adapter.supported_types:
+                target_skills = adapter.get_destination("skills", cwd)
+            else:
+                target_skills = None
+            if "commands" in adapter.supported_types:
+                target_commands = adapter.get_destination("commands", cwd)
+            else:
+                target_commands = None
+
+        if target_skills is None:
+            print(f"Warning: Tool '{resolved}' has no skills directory configured; skipping.", file=sys.stderr)
+            continue
+
+        result = _install_builtin_skills(target_skills, target_commands)
+        skills_n = result["skills_installed"]
+        commands_n = result["commands_installed"]
+        location = "globally" if global_install else f"into {Path.cwd()}"
+        print(f"Installed {skills_n} skill(s) and {commands_n} command(s) for '{resolved}' {location}.")
+
+    return 1 if any_failure else 0
+
+
+def handle_config_backup(args: argparse.Namespace) -> int:
+    """Handle the art config backup command."""
+    from datetime import date
+    from .catalog import backup_catalog
+
+    output = getattr(args, "output", None)
+    if output is None:
+        output = f"artifactr-backup-{date.today().strftime('%Y%m%d')}.zip"
+
+    result = backup_catalog(output)
+    if not result["success"]:
+        print(f"Error: {result['error']}", file=sys.stderr)
+        return 1
+
+    vault_count = result["vault_count"]
+    print(f"Backup written to {result['output']} ({vault_count} vault(s)).")
+    return 0
+
+
+def handle_config_restore(args: argparse.Namespace) -> int:
+    """Handle the art config restore command."""
+    from .catalog import restore_catalog
+
+    archive = args.archive
+    result = restore_catalog(archive)
+
+    if not result["success"]:
+        print(f"Error: {result['error']}", file=sys.stderr)
+        return 1
+
+    for entry in result["extracted"]:
+        print(f"  Restored vault '{entry['name']}' → {entry['path']}")
+
+    for original, assigned in result.get("renames", {}).items():
+        print(f"  Warning: name conflict — '{original}' renamed to '{assigned}'")
+
+    for warning in result.get("warnings", []):
+        print(f"  Warning: {warning}")
+
+    for error in result.get("errors", []):
+        print(f"  Error: {error}", file=sys.stderr)
+
+    n = len(result["extracted"])
+    print(f"Restore complete: {n} vault(s) extracted.")
+    return 0
+
+
 def main() -> int:
     """Main entry point for the CLI."""
     try:
@@ -5196,6 +5361,10 @@ def _main() -> int:
             return handle_conf_link(args)
         if conf_cmd in ("unlink", "uln"):
             return handle_conf_unlink(args)
+        if conf_cmd == "backup":
+            return handle_config_backup(args)
+        if conf_cmd == "restore":
+            return handle_config_restore(args)
 
     if args.command in ("vault", "v"):
         if args.vault_command is None:
@@ -5283,6 +5452,9 @@ def _main() -> int:
 
     if args.command in ("update", "upgrade"):
         return handle_update(args)
+
+    if args.command in ("update-native-skills", "uns"):
+        return handle_update_native_skills(args)
 
     return 0
 
